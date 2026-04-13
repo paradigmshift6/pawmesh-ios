@@ -8,6 +8,7 @@ struct DogTrackerApp: App {
     @State private var mesh: MeshService
     @State private var location = LocationProvider()
     @State private var units = UnitSettings()
+    @AppStorage("onboardingComplete") private var onboardingComplete = false
 
     init() {
         do {
@@ -25,18 +26,48 @@ struct DogTrackerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .onAppear {
-                    radio.start()
-                    mesh.start()
-                    location.requestPermission()
-                    radio.autoReconnect()
-                }
+            if onboardingComplete {
+                ContentView()
+                    .onAppear {
+                        radio.start()
+                        mesh.start()
+                        location.requestPermission()
+                        radio.autoReconnect()
+                    }
+            } else {
+                OnboardingRootView(radio: radio, mesh: mesh)
+            }
         }
         .modelContainer(modelContainer)
         .environment(radio)
         .environment(mesh)
         .environment(location)
         .environment(units)
+    }
+}
+
+/// Wrapper that creates and owns the OnboardingManager.
+private struct OnboardingRootView: View {
+    let radio: RadioController
+    let mesh: MeshService
+    @State private var manager: OnboardingManager?
+
+    var body: some View {
+        ZStack {
+            if let manager {
+                OnboardingContainerView(manager: manager)
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear {
+            if manager == nil {
+                let m = OnboardingManager(radio: radio)
+                m.startObserving()
+                radio.start()
+                mesh.start()
+                manager = m
+            }
+        }
     }
 }
