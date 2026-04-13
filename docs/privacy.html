@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Dog Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; line-height: 1.7; }
+    .header { background: #2E8B57; color: white; padding: 32px 20px; text-align: center; }
+    .header h1 { font-size: 1.8rem; }
+    .header a { color: white; opacity: 0.8; text-decoration: none; font-size: 0.9rem; }
+    .container { max-width: 680px; margin: 0 auto; padding: 40px 20px; }
+    h2 { margin: 28px 0 10px; font-size: 1.2rem; }
+    p, li { margin-bottom: 12px; }
+    ul { padding-left: 24px; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 24px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Privacy Policy</h1>
+    <a href="index.html">&larr; Back to Dog Tracker</a>
+  </div>
+
+  <div class="container">
+    <p class="updated">Last updated: April 13, 2026</p>
+
+    <h2>Summary</h2>
+    <p>Dog Tracker does not collect, transmit, or share any personal data. All data stays on your iPhone.</p>
+
+    <h2>Data We Collect</h2>
+    <p><strong>None.</strong> Dog Tracker has no servers, no analytics, no accounts, and no internet requirement for its core functionality.</p>
+
+    <h2>Data Stored on Your Device</h2>
+    <p>The following data is stored locally on your iPhone and never leaves it:</p>
+    <ul>
+      <li><strong>GPS positions</strong> — latitude, longitude, altitude, and timestamp from your dog trackers, received via Meshtastic radio. Stored in the app's local database.</li>
+      <li><strong>Your location</strong> — used to show your position on the map and calculate bearing/distance to your dogs. Never recorded or transmitted.</li>
+      <li><strong>Dog photos</strong> — optional photos you assign to each tracker, stored locally in the app's database.</li>
+      <li><strong>Offline map tiles</strong> — USGS topographic map tiles you download for offline use, stored as files on your device.</li>
+    </ul>
+
+    <h2>Bluetooth</h2>
+    <p>Dog Tracker uses Bluetooth Low Energy (BLE) to communicate with your Meshtastic radio. This connection is direct and local — no data passes through any external server.</p>
+
+    <h2>Location Services</h2>
+    <p>Dog Tracker requests location access to show your position on the map and compute bearing and distance to your dogs. If you grant "Always" access, the app can continue receiving dog positions while the screen is off. Your location is never transmitted off your device.</p>
+
+    <h2>Offline Map Downloads</h2>
+    <p>When you download map tiles for offline use, the app fetches publicly available USGS topographic map imagery from the U.S. government's National Map service. No personal data is sent in these requests beyond your device's IP address (standard for any web request).</p>
+
+    <h2>Third-Party Services</h2>
+    <p>Dog Tracker uses no third-party analytics, advertising, crash reporting, or tracking services.</p>
+
+    <h2>Children's Privacy</h2>
+    <p>Dog Tracker does not collect any personal information from anyone, including children.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>If this policy changes, the updated version will be posted here with a new "Last updated" date.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy? Open an issue on <a href="https://github.com/paradigmshift6/meshtastic-dog-tracker/issues">GitHub</a>.</p>
+  </div>
+</body>
+</html>

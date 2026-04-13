@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support — Dog Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; line-height: 1.7; }
+    .header { background: #2E8B57; color: white; padding: 32px 20px; text-align: center; }
+    .header h1 { font-size: 1.8rem; }
+    .header a { color: white; opacity: 0.8; text-decoration: none; font-size: 0.9rem; }
+    .container { max-width: 680px; margin: 0 auto; padding: 40px 20px; }
+    h2 { margin: 28px 0 10px; font-size: 1.2rem; }
+    p, li { margin-bottom: 12px; }
+    ul { padding-left: 24px; }
+    a { color: #2E8B57; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Support</h1>
+    <a href="index.html">&larr; Back to Dog Tracker</a>
+  </div>
+
+  <div class="container">
+    <h2>Get Help</h2>
+    <p>If you're having trouble with Dog Tracker, here are a few things to check first:</p>
+    <ul>
+      <li><strong>Bluetooth</strong> — Make sure Bluetooth is enabled in Settings and your Meshtastic radio is powered on and not connected to another app (like the official Meshtastic app).</li>
+      <li><strong>Location</strong> — Dog Tracker needs location access to show your position on the map. Go to Settings &rarr; Privacy &rarr; Location Services &rarr; Dog Tracker and select "While Using" or "Always."</li>
+      <li><strong>Tracker not appearing</strong> — Your dog's tracker must be running Meshtastic firmware with the Position module enabled and broadcasting on the same channel/region as your companion node.</li>
+      <li><strong>Stale position</strong> — If the fix-age indicator is red, the tracker hasn't reported in over 10 minutes. Try tapping Ping to request an immediate update. The tracker may be out of LoRa range or have lost GPS lock.</li>
+    </ul>
+
+    <h2>Report a Bug</h2>
+    <p>Found a bug or have a feature request? Open an issue on GitHub:</p>
+    <p><a href="https://github.com/paradigmshift6/meshtastic-dog-tracker/issues">github.com/paradigmshift6/meshtastic-dog-tracker/issues</a></p>
+
+    <h2>Contact</h2>
+    <p>For anything else, you can reach us by opening a GitHub issue. We'll do our best to respond promptly.</p>
+  </div>
+</body>
+</html>
