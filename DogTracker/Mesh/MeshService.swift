@@ -153,6 +153,8 @@ final class MeshService {
                 if let info = try? NodeInfo(serializedBytes: data.payload) {
                     upsertNodeInfo(info)
                 }
+            case .routingApp:
+                handleRoutingPacket(from: from, payload: data.payload, to: packet.to)
             default:
                 break
             }
@@ -165,6 +167,19 @@ final class MeshService {
         }
     }
 
+    private func handleRoutingPacket(from nodeNum: UInt32, payload: Data, to: UInt32) {
+        if let routing = try? Routing(serializedBytes: payload) {
+            let errName: String
+            switch routing.variant {
+            case .errorReason(let err):
+                errName = "\(err)"
+            default:
+                errName = "ack"
+            }
+            log.info("routing from \(nodeNum, format: .hex) to \(to, format: .hex): \(errName)")
+        }
+    }
+
     private func handlePositionPacket(from nodeNum: UInt32, payload: Data, isResponse: Bool) {
         guard let position = try? Position(serializedBytes: payload) else {
             log.warning("failed to decode Position from \(nodeNum, format: .hex), payload=\(payload.count) bytes")
@@ -173,7 +188,18 @@ final class MeshService {
 
         let lat = Double(position.latitudeI) * 1e-7
         let lon = Double(position.longitudeI) * 1e-7
-        log.info("position from \(nodeNum, format: .hex): \(lat),\(lon) alt=\(position.altitude) time=\(position.time) isResponse=\(isResponse)")
+        log.info("position from \(nodeNum, format: .hex): \(lat),\(lon) alt=\(position.altitude) time=\(position.time) sats=\(position.satsInView) isResponse=\(isResponse)")
+
+        if lat == 0 && lon == 0 {
+            log.info("position from \(nodeNum, format: .hex) is 0,0 (no GPS fix)")
+            // Still update lastHeard and mark that the node responded
+            if var node = nodes[nodeNum] {
+                node.lastHeard = Date()
+                node.lastPositionUpdate = Date()
+                nodes[nodeNum] = node
+            }
+            return
+        }
 
         // Update in-memory NodeDB — create the node if it doesn't exist yet
         var node = nodes[nodeNum] ?? MeshNode(
