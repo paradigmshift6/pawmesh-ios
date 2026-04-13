@@ -142,31 +142,48 @@ final class MeshService {
             nodes[from] = node
         }
 
-        guard case .decoded(let data) = packet.payloadVariant else { return }
+        switch packet.payloadVariant {
+        case .decoded(let data):
+            log.info("packet from \(from, format: .hex) portnum=\(data.portnum.rawValue) to=\(packet.to, format: .hex) bytes=\(data.payload.count)")
 
-        switch data.portnum {
-        case .positionApp:
-            handlePositionPacket(from: from, payload: data.payload, isResponse: data.wantResponse == false && packet.to == myNodeNum)
-        case .nodeinfoApp:
-            if let info = try? NodeInfo(serializedBytes: data.payload) {
-                upsertNodeInfo(info)
+            switch data.portnum {
+            case .positionApp:
+                handlePositionPacket(from: from, payload: data.payload, isResponse: packet.to == myNodeNum)
+            case .nodeinfoApp:
+                if let info = try? NodeInfo(serializedBytes: data.payload) {
+                    upsertNodeInfo(info)
+                }
+            default:
+                break
             }
+
+        case .encrypted(let data):
+            log.info("encrypted packet from \(from, format: .hex), \(data.count) bytes (cannot decode)")
+
         default:
-            break
+            log.info("packet from \(from, format: .hex) with unknown payload variant")
         }
     }
 
     private func handlePositionPacket(from nodeNum: UInt32, payload: Data, isResponse: Bool) {
         guard let position = try? Position(serializedBytes: payload) else {
-            log.warning("failed to decode Position from \(nodeNum, format: .hex)")
+            log.warning("failed to decode Position from \(nodeNum, format: .hex), payload=\(payload.count) bytes")
             return
         }
 
-        // Update in-memory NodeDB
-        if var node = nodes[nodeNum] {
-            applyPosition(position, to: &node)
-            nodes[nodeNum] = node
-        }
+        let lat = Double(position.latitudeI) * 1e-7
+        let lon = Double(position.longitudeI) * 1e-7
+        log.info("position from \(nodeNum, format: .hex): \(lat),\(lon) alt=\(position.altitude) time=\(position.time) isResponse=\(isResponse)")
+
+        // Update in-memory NodeDB — create the node if it doesn't exist yet
+        var node = nodes[nodeNum] ?? MeshNode(
+            num: nodeNum, longName: "", shortName: "",
+            hexID: String(format: "!%08x", nodeNum),
+            hwModel: .unset, hopsAway: 0
+        )
+        applyPosition(position, to: &node)
+        node.lastHeard = Date()
+        nodes[nodeNum] = node
 
         // Persist to SwiftData if this node is a tracked dog
         persistFix(nodeNum: nodeNum, position: position, source: isResponse ? .requested : .scheduled)
@@ -179,6 +196,7 @@ final class MeshService {
         guard !(lat == 0 && lon == 0) else { return }
         node.latitude = lat
         node.longitude = lon
+        node.lastPositionUpdate = Date()
         if pos.altitude != 0 { node.altitude = Double(pos.altitude) }
         if pos.time > 0 {
             node.positionTime = Date(timeIntervalSince1970: Double(pos.time))

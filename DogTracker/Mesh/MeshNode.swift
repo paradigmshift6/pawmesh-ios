@@ -19,7 +19,8 @@ struct MeshNode: Identifiable, Sendable {
     var latitude: Double?
     var longitude: Double?
     var altitude: Double?
-    var positionTime: Date?
+    var positionTime: Date?       // GPS time from the remote device
+    var lastPositionUpdate: Date? // When we received this position
 
     // Link quality
     var snr: Float?

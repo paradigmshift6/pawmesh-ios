@@ -208,7 +208,7 @@ private struct TrackerSheet: View {
             for _ in 0..<60 { // poll for 30 seconds
                 try? await Task.sleep(for: .milliseconds(500))
                 if let node = mesh.nodes[nodeNum],
-                   let t = node.positionTime, t > startTime {
+                   let t = node.lastPositionUpdate, t > startTime {
                     isPinging = false
                     pingResult = "Updated!"
                     if let lat = node.latitude, let lon = node.longitude {
