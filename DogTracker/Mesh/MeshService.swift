@@ -16,6 +16,8 @@ final class MeshService {
     private(set) var nodes: [UInt32: MeshNode] = [:]
     /// Our own node number, learned from `MyNodeInfo`.
     private(set) var myNodeNum: UInt32 = 0
+    /// Channel configs received during handshake, keyed by index.
+    private(set) var channels: [Int32: Channel] = [:]
 
     // MARK: - Private
 
@@ -55,9 +57,13 @@ final class MeshService {
         data.payload = Data()
         data.wantResponse = true
 
+        // Use the private/secondary channel if one exists, otherwise primary
+        let channelIndex = preferredChannelIndex
+
         var packet = MeshPacket()
         packet.from = myNodeNum
         packet.to = nodeNum
+        packet.channel = UInt32(channelIndex)
         packet.wantAck = true
         packet.hopLimit = 3
         packet.id = packetID
@@ -67,8 +73,21 @@ final class MeshService {
         toRadio.packet = packet
 
         try await radio.radio.sendToRadio(toRadio)
-        log.info("ping sent to \(nodeNum, format: .hex), id=\(packetID), hopLimit=3")
+        log.info("ping sent to \(nodeNum, format: .hex), id=\(packetID), ch=\(channelIndex), hopLimit=3")
         return packetID
+    }
+
+    /// The channel index to use for pings. Prefers a secondary (private)
+    /// channel if one exists, otherwise falls back to the primary channel.
+    private var preferredChannelIndex: Int32 {
+        // If there's a secondary channel with a PSK, use it
+        if let secondary = channels.values.first(where: {
+            $0.role == .secondary && !$0.settings.psk.isEmpty
+        }) {
+            return secondary.index
+        }
+        // Otherwise use primary
+        return 0
     }
 
     // MARK: - Event handling
@@ -99,6 +118,12 @@ final class MeshService {
 
         case .nodeInfo(let info):
             upsertNodeInfo(info)
+
+        case .channel(let ch):
+            channels[ch.index] = ch
+            let name = ch.settings.name.isEmpty ? "(default)" : ch.settings.name
+            let hasPSK = !ch.settings.psk.isEmpty
+            log.info("channel[\(ch.index)] role=\(ch.role.rawValue) name=\(name) hasPSK=\(hasPSK)")
 
         case .packet(let packet):
             processPacket(packet)
