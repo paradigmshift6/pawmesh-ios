@@ -12,7 +12,7 @@ struct MapScreen: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            DogMapView(markers: dogMarkers, centerOn: centerOn)
+            DogMapView(markers: dogMarkers, trails: dogTrails, centerOn: centerOn)
                 .ignoresSafeArea()
 
             statusBar
@@ -24,6 +24,17 @@ struct MapScreen: View {
             }
         }
         .overlay(alignment: .bottomTrailing) { pingAllButton }
+    }
+
+    // MARK: - Trails
+
+    private var dogTrails: [DogTrail] {
+        trackers.compactMap { tracker -> DogTrail? in
+            let fixes = tracker.fixes.sorted { $0.fixTime < $1.fixTime }
+            guard fixes.count >= 2 else { return nil }
+            let coords = fixes.map { (lat: $0.latitude, lon: $0.longitude) }
+            return DogTrail(nodeNum: tracker.nodeNum, colorHex: tracker.colorHex, coordinates: coords)
+        }
     }
 
     // MARK: - Markers

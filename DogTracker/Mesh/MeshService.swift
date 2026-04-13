@@ -138,7 +138,8 @@ final class MeshService {
     private func upsertNodeInfo(_ info: NodeInfo) {
         let num = info.num
         var node = nodes[num] ?? MeshNode(
-            num: num, longName: "", shortName: "", hexID: "",
+            num: num, longName: "", shortName: "",
+            hexID: String(format: "!%08x", num),
             hwModel: .unset, hopsAway: 0
         )
         if info.hasUser {
@@ -175,8 +176,18 @@ final class MeshService {
             case .positionApp:
                 handlePositionPacket(from: from, payload: data.payload, isResponse: packet.to == myNodeNum)
             case .nodeinfoApp:
-                if let info = try? NodeInfo(serializedBytes: data.payload) {
-                    upsertNodeInfo(info)
+                // nodeinfoApp packets contain User objects (not NodeInfo)
+                if let user = try? User(serializedBytes: data.payload) {
+                    var node = nodes[from] ?? MeshNode(
+                        num: from, longName: "", shortName: "",
+                        hexID: String(format: "!%08x", from),
+                        hwModel: .unset, hopsAway: 0
+                    )
+                    node.longName = user.longName
+                    node.shortName = user.shortName
+                    if !user.id.isEmpty { node.hexID = user.id }
+                    node.hwModel = user.hwModel
+                    nodes[from] = node
                 }
             case .routingApp:
                 handleRoutingPacket(from: from, payload: data.payload, to: packet.to)

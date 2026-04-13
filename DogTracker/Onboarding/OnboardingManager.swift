@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 import OSLog
 
 /// Drives the onboarding wizard state machine. Orchestrates BLE connections
@@ -28,6 +29,7 @@ final class OnboardingManager {
     // MARK: - Private
 
     private let radio: RadioController
+    private let modelContainer: ModelContainer?
     private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "Onboarding")
 
     /// UUID of the companion peripheral, saved so we can reconnect after
@@ -40,8 +42,9 @@ final class OnboardingManager {
     /// Consumer task for radio events.
     private var consumer: Task<Void, Never>?
 
-    init(radio: RadioController) {
+    init(radio: RadioController, modelContainer: ModelContainer? = nil) {
         self.radio = radio
+        self.modelContainer = modelContainer
     }
 
     // MARK: - Step navigation
@@ -72,7 +75,7 @@ final class OnboardingManager {
             step = .connectTracker
             // Disconnect from companion, start scanning for tracker
             companionPeripheralUUID = savedCompanionUUID
-            radio.disconnect()
+            radio.disconnectForSwitch()
             // Small delay then scan
             Task {
                 try? await Task.sleep(for: .seconds(1))
@@ -103,7 +106,7 @@ final class OnboardingManager {
     /// User chose to add another tracker from the addMoreTrackers step.
     func addAnotherTracker() {
         step = .connectTracker
-        radio.disconnect()
+        radio.disconnectForSwitch()
         Task {
             try? await Task.sleep(for: .seconds(1))
             radio.startScan()
@@ -113,6 +116,10 @@ final class OnboardingManager {
     /// User is done adding trackers.
     func finishOnboarding() {
         step = .complete
+        // Restore companion UUID as the auto-reconnect target
+        if let uuid = companionPeripheralUUID {
+            UserDefaults.standard.set(uuid.uuidString, forKey: "lastConnectedPeripheralUUID")
+        }
         // Reconnect to companion
         reconnectCompanion()
         // Mark onboarding as complete
@@ -181,6 +188,11 @@ final class OnboardingManager {
     private func handleConfigComplete() {
         switch step {
         case .connectCompanion:
+            // Save companion UUID before we might connect to a tracker later
+            if let uuidStr = UserDefaults.standard.string(forKey: "lastConnectedPeripheralUUID") {
+                UserDefaults.standard.set(uuidStr, forKey: Self.companionUUIDKey)
+                companionPeripheralUUID = UUID(uuidString: uuidStr)
+            }
             step = .checkingCompanion
             checkCompanionConfig()
 
@@ -365,11 +377,13 @@ final class OnboardingManager {
             // Position: GPS on, 2-min broadcast, smart at 10m
             var position = Config.PositionConfig()
             position.gpsMode = .enabled
+            position.gpsEnabled = true
             position.positionBroadcastSecs = 120
             position.positionBroadcastSmartEnabled = true
             position.broadcastSmartMinimumDistance = 10
             position.broadcastSmartMinimumIntervalSecs = 30
-            position.gpsUpdateInterval = 60
+            position.gpsUpdateInterval = 30
+            position.gpsAttemptTime = 120
             position.positionFlags = 1 | 8 | 32 | 64 // altitude|dop|satinview|seqNo
             try await configurator.setPositionConfig(position, on: nodeNum)
             markProgress(idx); idx += 1
@@ -399,6 +413,9 @@ final class OnboardingManager {
             configuredTrackerCount += 1
             log.info("tracker configured successfully")
 
+            // Auto-add tracker to dogs list
+            createTrackerEntry(nodeNum: nodeNum, name: deviceName)
+
             try? await Task.sleep(for: .seconds(3))
             step = .trackerReady
         } catch {
@@ -410,14 +427,43 @@ final class OnboardingManager {
 
     // MARK: - Helpers
 
+    private func createTrackerEntry(nodeNum: UInt32, name: String) {
+        guard let modelContainer else { return }
+        let context = ModelContext(modelContainer)
+        // Check if this node is already tracked
+        let descriptor = FetchDescriptor<Tracker>(
+            predicate: #Predicate { $0.nodeNum == nodeNum }
+        )
+        if let existing = try? context.fetch(descriptor).first {
+            // Update name if it changed
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { existing.name = trimmed }
+            try? context.save()
+            return
+        }
+        let colors = ["#E74C3C", "#2ECC71", "#3498DB"]
+        let color = colors[(configuredTrackerCount - 1) % colors.count]
+        let displayName = name.trimmingCharacters(in: .whitespaces)
+        let tracker = Tracker(
+            nodeNum: nodeNum,
+            name: displayName.isEmpty ? "Dog \(configuredTrackerCount)" : displayName,
+            colorHex: color
+        )
+        context.insert(tracker)
+        try? context.save()
+        log.info("created tracker entry for \(nodeNum, format: .hex) name=\(tracker.name)")
+    }
+
     private func markProgress(_ index: Int) {
         if index < configProgress.count {
             configProgress[index].done = true
         }
     }
 
+    private static let companionUUIDKey = "companionPeripheralUUID"
+
     private var savedCompanionUUID: UUID? {
-        guard let s = UserDefaults.standard.string(forKey: "lastConnectedPeripheralUUID") else {
+        guard let s = UserDefaults.standard.string(forKey: Self.companionUUIDKey) else {
             return nil
         }
         return UUID(uuidString: s)

@@ -49,7 +49,7 @@ struct TrackersScreen: View {
                 ContentUnavailableView(
                     "No nodes seen",
                     systemImage: "antenna.radiowaves.left.and.right",
-                    description: Text("Connect to your Heltec V3 radio first, then mesh nodes will appear here.")
+                    description: Text("Connect to your Meshtastic radio first, then mesh nodes will appear here.")
                 )
             } else {
                 ForEach(unassigned, id: \.num) { node in

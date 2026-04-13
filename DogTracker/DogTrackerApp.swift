@@ -35,7 +35,7 @@ struct DogTrackerApp: App {
                         radio.autoReconnect()
                     }
             } else {
-                OnboardingRootView(radio: radio, mesh: mesh)
+                OnboardingRootView(radio: radio, mesh: mesh, modelContainer: modelContainer)
             }
         }
         .modelContainer(modelContainer)
@@ -50,6 +50,7 @@ struct DogTrackerApp: App {
 private struct OnboardingRootView: View {
     let radio: RadioController
     let mesh: MeshService
+    let modelContainer: ModelContainer
     @State private var manager: OnboardingManager?
 
     var body: some View {
@@ -62,7 +63,7 @@ private struct OnboardingRootView: View {
         }
         .onAppear {
             if manager == nil {
-                let m = OnboardingManager(radio: radio)
+                let m = OnboardingManager(radio: radio, modelContainer: modelContainer)
                 m.startObserving()
                 radio.start()
                 mesh.start()

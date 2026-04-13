@@ -96,6 +96,13 @@ final class RadioController {
         Task { await radio.disconnect() }
     }
 
+    /// Disconnect without clearing saved peripheral or suppressing reconnect.
+    /// Used during onboarding when switching between companion and tracker.
+    func disconnectForSwitch() {
+        reconnectTask?.cancel()
+        Task { await radio.disconnect() }
+    }
+
     // MARK: - Event handling
 
     private func handle(_ event: RadioEvent) {

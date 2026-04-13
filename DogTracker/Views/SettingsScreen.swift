@@ -21,7 +21,7 @@ struct SettingsScreen: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showTrackerSetup) {
-                TrackerSetupSheet(radio: radio)
+                TrackerSetupSheet(radio: radio, modelContainer: modelContext.container)
             }
         }
     }
@@ -115,6 +115,7 @@ struct SettingsScreen: View {
 
 private struct TrackerSetupSheet: View {
     let radio: RadioController
+    let modelContainer: ModelContainer
     @Environment(\.dismiss) private var dismiss
     @State private var manager: OnboardingManager?
 
@@ -137,7 +138,7 @@ private struct TrackerSetupSheet: View {
         }
         .onAppear {
             if manager == nil {
-                let m = OnboardingManager(radio: radio)
+                let m = OnboardingManager(radio: radio, modelContainer: modelContainer)
                 // Jump straight to tracker setup
                 m.startObserving()
                 manager = m

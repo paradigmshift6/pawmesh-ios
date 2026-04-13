@@ -18,7 +18,7 @@ struct OnboardingContainerView: View {
                     manager: manager,
                     radio: radio,
                     title: "Connect Companion Radio",
-                    subtitle: "Power on your Heltec V3 and select it below.\nThis is the radio your phone connects to.",
+                    subtitle: "Power on your Meshtastic device and select it below.\nThis is the radio your phone connects to.",
                     systemImage: "antenna.radiowaves.left.and.right"
                 )
 

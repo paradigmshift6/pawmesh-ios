@@ -14,6 +14,7 @@ extension Notification.Name {
 struct DogMapView: UIViewRepresentable {
 
     let markers: [DogMarker]
+    var trails: [DogTrail] = []
     var centerOn: CLLocationCoordinate2D?
     /// Optional path to an MBTiles file for offline topo tiles.
     var offlineTilePath: String?
@@ -32,6 +33,7 @@ struct DogMapView: UIViewRepresentable {
 
     func updateUIView(_ mapView: MLNMapView, context: Context) {
         context.coordinator.updateMarkers(on: mapView, markers: markers)
+        context.coordinator.updateTrails(on: mapView, trails: trails)
 
         if let center = centerOn {
             mapView.setCenter(center, zoomLevel: max(mapView.zoomLevel, 14), animated: true)
@@ -43,6 +45,8 @@ struct DogMapView: UIViewRepresentable {
     class Coordinator: NSObject, MLNMapViewDelegate {
         private var currentAnnotations: [String: MLNPointAnnotation] = [:]
         private var markerColors: [String: String] = [:]
+        private var currentTrails: [UInt32: MLNPolyline] = [:]
+        private var trailColors: [UInt32: String] = [:]
         private var tileSourceAdded = false
         /// Path of the currently loaded mbtiles file, so we know if it changed.
         private var loadedMBTilesPath: String?
@@ -100,6 +104,63 @@ struct DogMapView: UIViewRepresentable {
                 currentAnnotations.removeValue(forKey: key)
                 markerColors.removeValue(forKey: key)
             }
+        }
+
+        func updateTrails(on mapView: MLNMapView, trails: [DogTrail]) {
+            var nextIDs = Set<UInt32>()
+
+            for trail in trails {
+                guard trail.coordinates.count >= 2 else { continue }
+                nextIDs.insert(trail.nodeNum)
+                trailColors[trail.nodeNum] = trail.colorHex
+
+                var coords = trail.coordinates.map {
+                    CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                }
+
+                // Remove old polyline if coordinate count changed
+                if let existing = currentTrails[trail.nodeNum] {
+                    if existing.pointCount != UInt(coords.count) {
+                        mapView.removeAnnotation(existing)
+                        let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
+                        mapView.addAnnotation(polyline)
+                        currentTrails[trail.nodeNum] = polyline
+                    } else {
+                        // Update coordinates in place
+                        mapView.removeAnnotation(existing)
+                        let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
+                        mapView.addAnnotation(polyline)
+                        currentTrails[trail.nodeNum] = polyline
+                    }
+                } else {
+                    let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
+                    mapView.addAnnotation(polyline)
+                    currentTrails[trail.nodeNum] = polyline
+                }
+            }
+
+            // Remove trails for trackers no longer present
+            for (nodeNum, polyline) in currentTrails where !nextIDs.contains(nodeNum) {
+                mapView.removeAnnotation(polyline)
+                currentTrails.removeValue(forKey: nodeNum)
+                trailColors.removeValue(forKey: nodeNum)
+            }
+        }
+
+        func mapView(_ mapView: MLNMapView, strokeColorForShapeAnnotation annotation: MLNShape) -> UIColor {
+            if let polyline = annotation as? MLNPolyline {
+                // Find matching trail color
+                for (nodeNum, trail) in currentTrails where trail === polyline {
+                    if let hex = trailColors[nodeNum] {
+                        return UIColor(hex: hex)?.withAlphaComponent(0.7) ?? .systemBlue
+                    }
+                }
+            }
+            return .systemBlue
+        }
+
+        func mapView(_ mapView: MLNMapView, lineWidthForPolylineAnnotation annotation: MLNPolyline) -> CGFloat {
+            3.0
         }
 
         func mapView(_ mapView: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
@@ -211,6 +272,18 @@ struct DogMarker: Equatable {
     let longitude: Double
     let subtitle: String
     let photoData: Data?
+}
+
+/// Trail data for drawing movement history polylines.
+struct DogTrail: Equatable {
+    let nodeNum: UInt32
+    let colorHex: String
+    let coordinates: [(lat: Double, lon: Double)]
+
+    static func == (lhs: DogTrail, rhs: DogTrail) -> Bool {
+        lhs.nodeNum == rhs.nodeNum && lhs.colorHex == rhs.colorHex
+            && lhs.coordinates.count == rhs.coordinates.count
+    }
 }
 
 // MARK: - UIColor hex parsing
