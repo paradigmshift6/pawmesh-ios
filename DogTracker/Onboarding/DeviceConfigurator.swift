@@ -57,7 +57,7 @@ actor DeviceConfigurator {
         var admin = AdminMessage()
         admin.payloadVariant = .setConfig(c)
         try await sendAdmin(admin, to: nodeNum, hopLimit: 0)
-        log.info("setConfig(lora) sent to \(nodeNum, format: .hex)")
+        log.info("setConfig(lora) sent to \(nodeNum, format: .hex) region=\(config.region.rawValue)")
     }
 
     // MARK: - Set owner (device name)

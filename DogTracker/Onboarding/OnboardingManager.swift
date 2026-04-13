@@ -270,7 +270,7 @@ final class OnboardingManager {
 
         do {
             try await configurator.beginEdit(nodeNum: nodeNum)
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Device name
             if hasName {
@@ -278,7 +278,7 @@ final class OnboardingManager {
                 let short = String(name.prefix(4))
                 try await configurator.setOwner(longName: name, shortName: short, on: nodeNum)
                 markProgress(idx); idx += 1
-                try await Task.sleep(for: .milliseconds(200))
+                try await Task.sleep(for: .milliseconds(500))
             }
 
             // Device role
@@ -286,7 +286,7 @@ final class OnboardingManager {
             device.role = .client
             try await configurator.setDeviceConfig(device, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Position
             var position = Config.PositionConfig()
@@ -294,7 +294,7 @@ final class OnboardingManager {
             position.positionBroadcastSecs = 0
             try await configurator.setPositionConfig(position, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // LoRa
             var lora = Config.LoRaConfig()
@@ -305,12 +305,12 @@ final class OnboardingManager {
             lora.txEnabled = true
             try await configurator.setLoRaConfig(lora, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Private channel with full 32-bit precision position
             try await configurator.setChannel(channel, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Commit
             try await configurator.commitEdit(nodeNum: nodeNum)
@@ -356,7 +356,7 @@ final class OnboardingManager {
 
         do {
             try await configurator.beginEdit(nodeNum: nodeNum)
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Device name
             if hasName {
@@ -364,7 +364,7 @@ final class OnboardingManager {
                 let short = String(name.prefix(4))
                 try await configurator.setOwner(longName: name, shortName: short, on: nodeNum)
                 markProgress(idx); idx += 1
-                try await Task.sleep(for: .milliseconds(200))
+                try await Task.sleep(for: .milliseconds(500))
             }
 
             // Device role: tracker
@@ -372,7 +372,7 @@ final class OnboardingManager {
             device.role = .tracker
             try await configurator.setDeviceConfig(device, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Position: GPS on, 2-min broadcast, smart at 10m
             var position = Config.PositionConfig()
@@ -387,7 +387,7 @@ final class OnboardingManager {
             position.positionFlags = 1 | 8 | 32 | 64 // altitude|dop|satinview|seqNo
             try await configurator.setPositionConfig(position, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // LoRa: match companion
             var lora = Config.LoRaConfig()
@@ -398,12 +398,12 @@ final class OnboardingManager {
             lora.txEnabled = true
             try await configurator.setLoRaConfig(lora, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Private channel with full 32-bit precision position
             try await configurator.setChannel(channel, on: nodeNum)
             markProgress(idx); idx += 1
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(500))
 
             // Commit
             try await configurator.commitEdit(nodeNum: nodeNum)
