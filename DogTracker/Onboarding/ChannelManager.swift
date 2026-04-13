@@ -45,10 +45,31 @@ enum ChannelManager {
 
     // MARK: - Private
 
+    /// Channel 0 (primary) with position disabled so the tracker doesn't
+    /// broadcast position there. Trackers send position to the first
+    /// channel with positionPrecision > 0.
+    static func primaryChannelPositionDisabled() -> Channel {
+        var modSettings = ModuleSettings()
+        modSettings.positionPrecision = 0
+
+        var settings = ChannelSettings()
+        settings.moduleSettings = modSettings
+
+        var channel = Channel()
+        channel.index = 0
+        channel.role = .primary
+        channel.settings = settings
+        return channel
+    }
+
     private static func channelWith(psk: Data) -> Channel {
+        var modSettings = ModuleSettings()
+        modSettings.positionPrecision = 32
+
         var settings = ChannelSettings()
         settings.name = channelName
         settings.psk = psk
+        settings.moduleSettings = modSettings
 
         var channel = Channel()
         channel.index = channelIndex

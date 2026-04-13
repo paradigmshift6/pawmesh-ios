@@ -258,13 +258,15 @@ final class OnboardingManager {
             ConfigItem(label: "Device role", done: false),
             ConfigItem(label: "Position settings", done: false),
             ConfigItem(label: "LoRa radio", done: false),
-            ConfigItem(label: "Private channel", done: false),
+            ConfigItem(label: "Primary channel (no position)", done: false),
+            ConfigItem(label: "Private channel (full precision)", done: false),
             ConfigItem(label: "Saving", done: false),
         ])
         configProgress = items
 
         let configurator = DeviceConfigurator(radio: radio.radio)
         let channel = ChannelManager.makePrivateChannel()
+        let primaryCh = ChannelManager.primaryChannelPositionDisabled()
         let nodeNum = connectedNodeNum
         var idx = 0
 
@@ -307,7 +309,12 @@ final class OnboardingManager {
             markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
-            // Channel
+            // Disable position on primary channel
+            try await configurator.setChannel(primaryCh, on: nodeNum)
+            markProgress(idx); idx += 1
+            try await Task.sleep(for: .milliseconds(200))
+
+            // Private channel with full precision position
             try await configurator.setChannel(channel, on: nodeNum)
             markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
@@ -340,7 +347,8 @@ final class OnboardingManager {
             ConfigItem(label: "Device role (tracker)", done: false),
             ConfigItem(label: "GPS & position broadcasting", done: false),
             ConfigItem(label: "LoRa radio", done: false),
-            ConfigItem(label: "Private channel", done: false),
+            ConfigItem(label: "Primary channel (no position)", done: false),
+            ConfigItem(label: "Private channel (full precision)", done: false),
             ConfigItem(label: "Saving", done: false),
         ])
         configProgress = items
@@ -351,6 +359,7 @@ final class OnboardingManager {
             isConfiguring = false
             return
         }
+        let primaryCh = ChannelManager.primaryChannelPositionDisabled()
         let nodeNum = connectedNodeNum
         var idx = 0
 
@@ -400,7 +409,12 @@ final class OnboardingManager {
             markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
-            // Same private channel
+            // Disable position on primary channel so tracker uses private channel
+            try await configurator.setChannel(primaryCh, on: nodeNum)
+            markProgress(idx); idx += 1
+            try await Task.sleep(for: .milliseconds(200))
+
+            // Private channel with full 32-bit precision position
             try await configurator.setChannel(channel, on: nodeNum)
             markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
