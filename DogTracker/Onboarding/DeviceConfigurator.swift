@@ -60,6 +60,18 @@ actor DeviceConfigurator {
         log.info("setConfig(lora) sent to \(nodeNum, format: .hex)")
     }
 
+    // MARK: - Set owner (device name)
+
+    func setOwner(longName: String, shortName: String, on nodeNum: UInt32) async throws {
+        var user = User()
+        user.longName = longName
+        user.shortName = String(shortName.prefix(4))
+        var admin = AdminMessage()
+        admin.payloadVariant = .setOwner(user)
+        try await sendAdmin(admin, to: nodeNum, hopLimit: 0)
+        log.info("setOwner(\(longName) / \(shortName)) sent to \(nodeNum, format: .hex)")
+    }
+
     // MARK: - Set channel
 
     func setChannel(_ channel: Channel, on nodeNum: UInt32) async throws {

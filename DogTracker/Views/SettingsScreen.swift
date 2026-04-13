@@ -148,8 +148,8 @@ private struct TrackerSetupSheet: View {
     @ViewBuilder
     private func trackerFlow(_ manager: OnboardingManager) -> some View {
         switch manager.step {
-        case .welcome, .connectCompanion, .checkingCompanion, .regionSelect,
-             .configuringCompanion, .companionReady, .connectTracker:
+        case .welcome, .connectCompanion, .checkingCompanion, .nameCompanion,
+             .regionSelect, .configuringCompanion, .companionReady, .connectTracker:
             ConnectDeviceStepView(
                 manager: manager,
                 radio: radio,
@@ -165,6 +165,16 @@ private struct TrackerSetupSheet: View {
                     radio.startScan()
                 }
             }
+
+        case .nameTracker:
+            NameDeviceView(
+                manager: manager,
+                title: "Name This Tracker",
+                subtitle: "Enter your dog's name.",
+                systemImage: "pawprint.fill",
+                placeholder: "e.g. Buddy",
+                isRequired: true
+            )
 
         case .configuringTracker:
             ConfiguringDeviceView(

@@ -19,6 +19,9 @@ final class OnboardingManager {
     /// LoRa region chosen by the user during onboarding.
     var selectedRegion: Config.LoRaConfig.RegionCode = .us
 
+    /// Device name entered by the user.
+    var deviceName: String = ""
+
     /// Peripheral UUIDs of configured trackers (for display).
     private(set) var configuredTrackerCount = 0
 
@@ -55,6 +58,9 @@ final class OnboardingManager {
         case .checkingCompanion:
             break // automatic
 
+        case .nameCompanion:
+            step = .regionSelect
+
         case .regionSelect:
             step = .configuringCompanion
             Task { await configureCompanion() }
@@ -75,6 +81,10 @@ final class OnboardingManager {
 
         case .connectTracker:
             break // connection triggers advance
+
+        case .nameTracker:
+            step = .configuringTracker
+            Task { await configureTracker() }
 
         case .configuringTracker:
             break // automatic
@@ -175,8 +185,8 @@ final class OnboardingManager {
             checkCompanionConfig()
 
         case .connectTracker:
-            step = .configuringTracker
-            Task { await configureTracker() }
+            deviceName = ""
+            step = .nameTracker
 
         default:
             break
@@ -199,7 +209,8 @@ final class OnboardingManager {
                 ChannelManager.adoptPSK(from: channels)
                 step = .companionReady
             } else {
-                step = .regionSelect
+                deviceName = ""
+                step = .nameCompanion
             }
         }
     }
@@ -228,27 +239,41 @@ final class OnboardingManager {
 
     private func configureCompanion() async {
         isConfiguring = true
-        configProgress = [
+        let hasName = !deviceName.trimmingCharacters(in: .whitespaces).isEmpty
+        var items = [ConfigItem]()
+        if hasName { items.append(ConfigItem(label: "Device name", done: false)) }
+        items.append(contentsOf: [
             ConfigItem(label: "Device role", done: false),
             ConfigItem(label: "Position settings", done: false),
             ConfigItem(label: "LoRa radio", done: false),
             ConfigItem(label: "Private channel", done: false),
             ConfigItem(label: "Saving", done: false),
-        ]
+        ])
+        configProgress = items
 
         let configurator = DeviceConfigurator(radio: radio.radio)
         let channel = ChannelManager.makePrivateChannel()
         let nodeNum = connectedNodeNum
+        var idx = 0
 
         do {
             try await configurator.beginEdit(nodeNum: nodeNum)
             try await Task.sleep(for: .milliseconds(200))
 
+            // Device name
+            if hasName {
+                let name = deviceName.trimmingCharacters(in: .whitespaces)
+                let short = String(name.prefix(4))
+                try await configurator.setOwner(longName: name, shortName: short, on: nodeNum)
+                markProgress(idx); idx += 1
+                try await Task.sleep(for: .milliseconds(200))
+            }
+
             // Device role
             var device = Config.DeviceConfig()
             device.role = .client
             try await configurator.setDeviceConfig(device, on: nodeNum)
-            markProgress(0)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Position
@@ -256,7 +281,7 @@ final class OnboardingManager {
             position.gpsMode = .notPresent
             position.positionBroadcastSecs = 0
             try await configurator.setPositionConfig(position, on: nodeNum)
-            markProgress(1)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // LoRa
@@ -267,17 +292,17 @@ final class OnboardingManager {
             lora.hopLimit = 3
             lora.txEnabled = true
             try await configurator.setLoRaConfig(lora, on: nodeNum)
-            markProgress(2)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Channel
             try await configurator.setChannel(channel, on: nodeNum)
-            markProgress(3)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Commit
             try await configurator.commitEdit(nodeNum: nodeNum)
-            markProgress(4)
+            markProgress(idx)
 
             isConfiguring = false
             log.info("companion configured successfully")
@@ -296,13 +321,17 @@ final class OnboardingManager {
 
     private func configureTracker() async {
         isConfiguring = true
-        configProgress = [
+        let hasName = !deviceName.trimmingCharacters(in: .whitespaces).isEmpty
+        var items = [ConfigItem]()
+        if hasName { items.append(ConfigItem(label: "Device name", done: false)) }
+        items.append(contentsOf: [
             ConfigItem(label: "Device role (tracker)", done: false),
             ConfigItem(label: "GPS & position broadcasting", done: false),
             ConfigItem(label: "LoRa radio", done: false),
             ConfigItem(label: "Private channel", done: false),
             ConfigItem(label: "Saving", done: false),
-        ]
+        ])
+        configProgress = items
 
         let configurator = DeviceConfigurator(radio: radio.radio)
         guard let channel = ChannelManager.existingPrivateChannel() else {
@@ -311,16 +340,26 @@ final class OnboardingManager {
             return
         }
         let nodeNum = connectedNodeNum
+        var idx = 0
 
         do {
             try await configurator.beginEdit(nodeNum: nodeNum)
             try await Task.sleep(for: .milliseconds(200))
 
+            // Device name
+            if hasName {
+                let name = deviceName.trimmingCharacters(in: .whitespaces)
+                let short = String(name.prefix(4))
+                try await configurator.setOwner(longName: name, shortName: short, on: nodeNum)
+                markProgress(idx); idx += 1
+                try await Task.sleep(for: .milliseconds(200))
+            }
+
             // Device role: tracker
             var device = Config.DeviceConfig()
             device.role = .tracker
             try await configurator.setDeviceConfig(device, on: nodeNum)
-            markProgress(0)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Position: GPS on, 2-min broadcast, smart at 10m
@@ -333,7 +372,7 @@ final class OnboardingManager {
             position.gpsUpdateInterval = 60
             position.positionFlags = 1 | 8 | 32 | 64 // altitude|dop|satinview|seqNo
             try await configurator.setPositionConfig(position, on: nodeNum)
-            markProgress(1)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // LoRa: match companion
@@ -344,17 +383,17 @@ final class OnboardingManager {
             lora.hopLimit = 3
             lora.txEnabled = true
             try await configurator.setLoRaConfig(lora, on: nodeNum)
-            markProgress(2)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Same private channel
             try await configurator.setChannel(channel, on: nodeNum)
-            markProgress(3)
+            markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(200))
 
             // Commit
             try await configurator.commitEdit(nodeNum: nodeNum)
-            markProgress(4)
+            markProgress(idx)
 
             isConfiguring = false
             configuredTrackerCount += 1
@@ -396,10 +435,12 @@ enum OnboardingStep: Equatable {
     case welcome
     case connectCompanion
     case checkingCompanion
+    case nameCompanion
     case regionSelect
     case configuringCompanion
     case companionReady
     case connectTracker
+    case nameTracker
     case configuringTracker
     case trackerReady
     case addMoreTrackers

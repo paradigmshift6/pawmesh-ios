@@ -31,6 +31,16 @@ struct OnboardingContainerView: View {
                     manager.setCapturedChannels(mesh.channels)
                 }
 
+            case .nameCompanion:
+                NameDeviceView(
+                    manager: manager,
+                    title: "Name Companion Radio",
+                    subtitle: "Give your companion radio a name\nso you can identify it on the mesh.",
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    placeholder: "e.g. My Radio",
+                    isRequired: false
+                )
+
             case .regionSelect:
                 RegionSelectView(manager: manager)
 
@@ -57,6 +67,16 @@ struct OnboardingContainerView: View {
                     title: "Connect Dog Tracker",
                     subtitle: "Power on the tracker and select it below.\nYou'll need to connect each tracker individually.",
                     systemImage: "pawprint.fill"
+                )
+
+            case .nameTracker:
+                NameDeviceView(
+                    manager: manager,
+                    title: "Name This Tracker",
+                    subtitle: "Enter your dog's name.\nThis will appear on the mesh network.",
+                    systemImage: "pawprint.fill",
+                    placeholder: "e.g. Buddy",
+                    isRequired: true
                 )
 
             case .configuringTracker:
