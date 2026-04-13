@@ -328,12 +328,18 @@ private struct RegionPickerMap: UIViewRepresentable {
         }
 
         private func reportBounds(_ mapView: MLNMapView) {
-            let bounds = mapView.visibleCoordinateBounds
-            // Account for the 24pt inset of the overlay rectangle
+            // Guard against zero-sized frame during sheet presentation animation
+            guard mapView.bounds.width > 48, mapView.bounds.height > 48 else { return }
+
             let inset: CGFloat = 24
-            let size = mapView.bounds.insetBy(dx: inset, dy: inset)
-            let nw = mapView.convert(CGPoint(x: size.minX, y: size.minY), toCoordinateFrom: mapView)
-            let se = mapView.convert(CGPoint(x: size.maxX, y: size.maxY), toCoordinateFrom: mapView)
+            let rect = mapView.bounds.insetBy(dx: inset, dy: inset)
+            let nw = mapView.convert(CGPoint(x: rect.minX, y: rect.minY), toCoordinateFrom: mapView)
+            let se = mapView.convert(CGPoint(x: rect.maxX, y: rect.maxY), toCoordinateFrom: mapView)
+
+            // Validate coordinates are sensible
+            guard nw.latitude.isFinite, se.latitude.isFinite,
+                  nw.longitude.isFinite, se.longitude.isFinite else { return }
+
             let minLat = min(nw.latitude, se.latitude)
             let maxLat = max(nw.latitude, se.latitude)
             let minLon = min(nw.longitude, se.longitude)

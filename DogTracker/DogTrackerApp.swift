@@ -30,6 +30,7 @@ struct DogTrackerApp: App {
                     radio.start()
                     mesh.start()
                     location.requestPermission()
+                    radio.autoReconnect()
                 }
         }
         .modelContainer(modelContainer)

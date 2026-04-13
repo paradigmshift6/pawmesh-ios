@@ -75,6 +75,13 @@ actor MeshtasticRadio {
         transport.disconnect()
     }
 
+    /// Connect directly by UUID without a prior scan. Used for auto-reconnect
+    /// to a previously paired peripheral.
+    func connectByUUID(_ id: UUID) {
+        setState(.connecting(name: "Reconnecting…"))
+        transport.connect(peripheralID: id)
+    }
+
     /// Send a fully-formed `ToRadio` to the radio. Used by phase 7 (Ping) and
     /// any future feature that wants to talk back upstream.
     func sendToRadio(_ message: ToRadio) throws {

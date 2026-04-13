@@ -24,6 +24,11 @@ final class RadioController {
     let radio: MeshtasticRadio
 
     private var consumer: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    /// Whether the user explicitly disconnected (suppress auto-reconnect).
+    private var userDisconnected = false
+
+    private static let savedPeripheralKey = "lastConnectedPeripheralUUID"
 
     init(transport: RadioTransport) {
         self.radio = MeshtasticRadio(transport: transport)
@@ -48,12 +53,48 @@ final class RadioController {
         }
     }
 
+    /// Try to reconnect to the last-used peripheral. Call on app launch
+    /// after `start()`. If BT isn't ready yet we wait briefly for it.
+    func autoReconnect() {
+        guard let uuidString = UserDefaults.standard.string(forKey: Self.savedPeripheralKey),
+              let uuid = UUID(uuidString: uuidString) else { return }
+
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            // Give CoreBluetooth a moment to power on
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(250))
+                if Task.isCancelled { return }
+                let state = self.connectionState
+                if case .bluetoothUnavailable = state { continue }
+                break
+            }
+            if Task.isCancelled { return }
+            // Ask the radio to connect directly by UUID (retrievePeripherals)
+            await self.radio.connectByUUID(uuid)
+        }
+    }
+
     // MARK: - Commands
 
     func startScan()      { Task { await radio.startScan() } }
     func stopScan()       { Task { await radio.stopScan() } }
-    func connect(_ id: UUID) { Task { await radio.connect(id) } }
-    func disconnect()     { Task { await radio.disconnect() } }
+
+    func connect(_ id: UUID) {
+        userDisconnected = false
+        reconnectTask?.cancel()
+        // Save for auto-reconnect
+        UserDefaults.standard.set(id.uuidString, forKey: Self.savedPeripheralKey)
+        Task { await radio.connect(id) }
+    }
+
+    func disconnect() {
+        userDisconnected = true
+        reconnectTask?.cancel()
+        // Clear saved peripheral so we don't auto-reconnect
+        UserDefaults.standard.removeObject(forKey: Self.savedPeripheralKey)
+        Task { await radio.disconnect() }
+    }
 
     // MARK: - Event handling
 
@@ -61,9 +102,15 @@ final class RadioController {
         switch event {
         case .stateChanged(let s):
             connectionState = s
-            if case .connected = s {} else if s != .configuring(name: "") {
-                // configComplete only resets on a fresh connect cycle
-                if case .disconnected = s { configComplete = false }
+
+            if case .connected = s {
+                reconnectTask?.cancel()
+            } else if case .disconnected = s {
+                configComplete = false
+                // Auto-reconnect on unexpected disconnect
+                if !userDisconnected {
+                    scheduleReconnect()
+                }
             }
         case .discovered(let list):
             discovered = list
@@ -73,6 +120,20 @@ final class RadioController {
             configComplete = true
         case .logMessage(let s):
             print("[Radio] \(s)")
+        }
+    }
+
+    /// After an unexpected disconnect, wait a few seconds then try to reconnect.
+    private func scheduleReconnect() {
+        guard let uuidString = UserDefaults.standard.string(forKey: Self.savedPeripheralKey),
+              let uuid = UUID(uuidString: uuidString) else { return }
+
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            // Wait before reconnecting to avoid rapid retry loops
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, !Task.isCancelled else { return }
+            await self.radio.connectByUUID(uuid)
         }
     }
 }

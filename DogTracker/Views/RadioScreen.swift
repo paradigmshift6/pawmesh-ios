@@ -11,7 +11,9 @@ struct RadioScreen: View {
         }
         .navigationTitle("Radio")
         .onAppear {
-            if case .disconnected = radio.connectionState {
+            // Only auto-scan if truly idle (not reconnecting)
+            if case .disconnected = radio.connectionState,
+               UserDefaults.standard.string(forKey: "lastConnectedPeripheralUUID") == nil {
                 radio.startScan()
             }
         }
