@@ -130,10 +130,12 @@ actor TileDownloader {
 
 enum TileDownloadError: Error, LocalizedError {
     case httpError(z: Int, x: Int, y: Int)
+    case noDocumentsDirectory
 
     var errorDescription: String? {
         switch self {
         case .httpError(let z, let x, let y): "Failed to download tile z=\(z) x=\(x) y=\(y)"
+        case .noDocumentsDirectory: "Unable to access Documents directory"
         }
     }
 }

@@ -29,12 +29,31 @@ enum BearingMath {
         return R * c
     }
 
-    /// Human-readable distance string.
-    static func distanceString(_ meters: Double) -> String {
-        if meters < 1000 {
+    /// Human-readable distance string in metric units.
+    static func distanceString(_ meters: Double, useMetric: Bool = true) -> String {
+        if useMetric {
+            if meters < 1000 {
+                return "\(Int(meters)) m"
+            } else {
+                return String(format: "%.1f km", meters / 1000)
+            }
+        } else {
+            let feet = meters * 3.28084
+            if feet < 1000 {
+                return "\(Int(feet)) ft"
+            } else {
+                let miles = meters / 1609.344
+                return String(format: "%.1f mi", miles)
+            }
+        }
+    }
+
+    /// Human-readable altitude string.
+    static func altitudeString(_ meters: Double, useMetric: Bool = true) -> String {
+        if useMetric {
             return "\(Int(meters)) m"
         } else {
-            return String(format: "%.1f km", meters / 1000)
+            return "\(Int(meters * 3.28084)) ft"
         }
     }
 }

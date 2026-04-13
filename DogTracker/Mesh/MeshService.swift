@@ -29,13 +29,14 @@ final class MeshService {
         self.modelContainer = modelContainer
     }
 
+
     /// Start consuming radio events. Call once at app startup, after
     /// `radio.start()`.
     func start() {
         guard consumer == nil else { return }
         consumer = Task { [weak self] in
             guard let self else { return }
-            let stream = await self.radio.radio.events
+            let stream = await self.radio.radio.subscribe()
             for await event in stream {
                 self.handle(event)
             }

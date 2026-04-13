@@ -5,6 +5,7 @@ import CoreLocation
 struct MapScreen: View {
     @Environment(RadioController.self) private var radio
     @Environment(MeshService.self) private var mesh
+    @Environment(UnitSettings.self) private var units
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
@@ -16,7 +17,7 @@ struct MapScreen: View {
 
             statusBar
             if let t = selectedTracker {
-                TrackerSheet(tracker: t, mesh: mesh) { coord in
+                TrackerSheet(tracker: t, mesh: mesh, units: units) { coord in
                     centerOn = coord
                 }
                 .transition(.move(edge: .bottom))
@@ -128,6 +129,7 @@ struct MapScreen: View {
 private struct TrackerSheet: View {
     let tracker: Tracker
     let mesh: MeshService
+    let units: UnitSettings
     let onCenter: (CLLocationCoordinate2D) -> Void
 
     @State private var isPinging = false
@@ -176,7 +178,7 @@ private struct TrackerSheet: View {
         let fields: [(String, String)] = [
             node.latitude.map { ("Lat", String(format: "%.6f", $0)) },
             node.longitude.map { ("Lon", String(format: "%.6f", $0)) },
-            node.altitude.map { ("Alt", "\(Int($0)) m") },
+            node.altitude.map { ("Alt", BearingMath.altitudeString($0, useMetric: units.useMetric)) },
             node.positionTime.map { ("Fix age", fixAgeText($0)) },
         ].compactMap { $0 }
         HStack(spacing: 16) {

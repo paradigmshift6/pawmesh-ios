@@ -5,6 +5,7 @@ import CoreLocation
 struct CompassScreen: View {
     @Environment(MeshService.self) private var mesh
     @Environment(LocationProvider.self) private var location
+    @Environment(UnitSettings.self) private var units
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @State private var selectedIndex = 0
 
@@ -15,6 +16,9 @@ struct CompassScreen: View {
                 .onAppear {
                     location.requestPermission()
                     location.startUpdating()
+                }
+                .onChange(of: trackers.count) { _, count in
+                    if selectedIndex >= count { selectedIndex = max(0, count - 1) }
                 }
         }
     }
@@ -49,7 +53,8 @@ struct CompassScreen: View {
     // MARK: - Compass
 
     @ViewBuilder private var compassBody: some View {
-        let tracker = trackers[min(selectedIndex, trackers.count - 1)]
+        let safeIndex = min(max(selectedIndex, 0), trackers.count - 1)
+        let tracker = trackers[safeIndex]
         let node = mesh.nodes[tracker.nodeNum]
 
         if let node, node.hasPosition,
@@ -66,7 +71,7 @@ struct CompassScreen: View {
             VStack(spacing: 24) {
                 Spacer()
                 arrowView(angle: arrowAngle, color: Color(hex: tracker.colorHex) ?? .green)
-                Text(BearingMath.distanceString(distance))
+                Text(BearingMath.distanceString(distance, useMetric: units.useMetric))
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                 fixAgeLabel(node: node)
                 Spacer()
@@ -127,14 +132,16 @@ struct CompassScreen: View {
     // MARK: - Ping
 
     @State private var isPinging = false
+    @State private var pingTask: Task<Void, Never>?
 
     private func pingButton(tracker: Tracker) -> some View {
         Button {
-            Task {
+            pingTask?.cancel()
+            pingTask = Task {
                 isPinging = true
                 _ = try? await mesh.requestPosition(from: tracker.nodeNum)
                 try? await Task.sleep(for: .seconds(30))
-                isPinging = false
+                if !Task.isCancelled { isPinging = false }
             }
         } label: {
             Label(isPinging ? "Pinging…" : "Ping \(tracker.name)",
@@ -146,6 +153,10 @@ struct CompassScreen: View {
         .disabled(isPinging)
         .padding(.horizontal)
         .padding(.bottom)
+        .onDisappear {
+            pingTask?.cancel()
+            isPinging = false
+        }
     }
 }
 

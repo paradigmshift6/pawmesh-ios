@@ -4,6 +4,7 @@ import SwiftData
 struct SettingsScreen: View {
     @Environment(RadioController.self) private var radio
     @Environment(MeshService.self) private var mesh
+    @Environment(UnitSettings.self) private var units
     @Environment(\.modelContext) private var modelContext
     @Query private var fixes: [Fix]
 
@@ -11,6 +12,7 @@ struct SettingsScreen: View {
         NavigationStack {
             Form {
                 radioSection
+                unitsSection
                 meshSection
                 historySection
                 aboutSection
@@ -26,6 +28,16 @@ struct SettingsScreen: View {
             } label: {
                 LabeledContent("Meshtastic radio", value: shortStatus)
             }
+        }
+    }
+
+    private var unitsSection: some View {
+        Section("Units") {
+            @Bindable var units = units
+            Toggle("Use metric (km / m)", isOn: $units.useMetric)
+            Text(units.useMetric ? "Distances in meters / kilometers" : "Distances in feet / miles")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

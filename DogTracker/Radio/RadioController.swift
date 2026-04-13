@@ -41,7 +41,7 @@ final class RadioController {
         consumer = Task { [weak self] in
             guard let self else { return }
             await self.radio.start()
-            let stream = await self.radio.events
+            let stream = await self.radio.subscribe()
             for await event in stream {
                 self.handle(event)
             }

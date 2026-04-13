@@ -17,21 +17,25 @@ actor MeshtasticRadio {
     /// Most recent scan results.
     private(set) var discovered: [DiscoveredPeripheral] = []
 
-    let events: AsyncStream<RadioEvent>
-    private let continuation: AsyncStream<RadioEvent>.Continuation
-
     // MARK: - Private state
 
     private let transport: RadioTransport
     private let log = Logger(subsystem: "com.example.DogTracker", category: "Radio")
     private var consumer: Task<Void, Never>?
     private var pendingWantConfigID: UInt32 = 0
+    private var subscribers: [AsyncStream<RadioEvent>.Continuation] = []
 
     init(transport: RadioTransport) {
         self.transport = transport
-        var c: AsyncStream<RadioEvent>.Continuation!
-        self.events = AsyncStream(bufferingPolicy: .unbounded) { c = $0 }
-        self.continuation = c
+    }
+
+    /// Create a new event stream. Each subscriber receives ALL events
+    /// independently — AsyncStream is single-consumer, so each caller
+    /// gets its own stream and continuation.
+    func subscribe() -> AsyncStream<RadioEvent> {
+        let (stream, continuation) = AsyncStream.makeStream(of: RadioEvent.self, bufferingPolicy: .unbounded)
+        subscribers.append(continuation)
+        return stream
     }
 
     /// Begin consuming transport events. Idempotent.
@@ -173,7 +177,7 @@ actor MeshtasticRadio {
     }
 
     private func emit(_ event: RadioEvent) {
-        continuation.yield(event)
+        for c in subscribers { c.yield(event) }
     }
 }
 

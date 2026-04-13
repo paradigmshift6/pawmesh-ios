@@ -7,6 +7,7 @@ struct DogTrackerApp: App {
     @State private var radio: RadioController
     @State private var mesh: MeshService
     @State private var location = LocationProvider()
+    @State private var units = UnitSettings()
 
     init() {
         do {
@@ -35,5 +36,6 @@ struct DogTrackerApp: App {
         .environment(radio)
         .environment(mesh)
         .environment(location)
+        .environment(units)
     }
 }

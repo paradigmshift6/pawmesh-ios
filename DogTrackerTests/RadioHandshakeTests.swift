@@ -12,7 +12,7 @@ final class RadioHandshakeTests: XCTestCase {
 
         // Subscribe to events BEFORE driving the transport so we don't miss
         // the configComplete signal.
-        let stream = await radio.events
+        let stream = await radio.subscribe()
         await radio.start()
 
         // Phase 1: scan + discover
@@ -52,7 +52,7 @@ final class RadioHandshakeTests: XCTestCase {
     func testInboundFromRadioIsRepublished() async throws {
         let fake = FakeRadioTransport()
         let radio = MeshtasticRadio(transport: fake)
-        let stream = await radio.events
+        let stream = await radio.subscribe()
         await radio.start()
 
         // Manufacture a Position-bearing FromRadio packet

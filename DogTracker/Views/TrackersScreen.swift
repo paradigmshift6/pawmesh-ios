@@ -6,11 +6,13 @@ struct TrackersScreen: View {
     @Environment(MeshService.self) private var mesh
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
+    @State private var searchText = ""
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Dogs")
+                .searchable(text: $searchText, prompt: "Search nodes")
         }
     }
 
@@ -61,8 +63,17 @@ struct TrackersScreen: View {
 
     private var unassignedNodes: [MeshNode] {
         let assignedNums = Set(trackers.map(\.nodeNum))
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         return mesh.nodes.values
-            .filter { !assignedNums.contains($0.num) && $0.num != mesh.myNodeNum }
+            .filter { node in
+                guard !assignedNums.contains(node.num), node.num != mesh.myNodeNum else {
+                    return false
+                }
+                guard !query.isEmpty else { return true }
+                return node.longName.lowercased().contains(query)
+                    || node.shortName.lowercased().contains(query)
+                    || node.hexID.lowercased().contains(query)
+            }
             .sorted { ($0.lastHeard ?? .distantPast) > ($1.lastHeard ?? .distantPast) }
     }
 

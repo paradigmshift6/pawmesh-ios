@@ -110,8 +110,11 @@ struct DogMapView: UIViewRepresentable {
 
         private func addTileSource(to style: MLNStyle) {
             // Try offline MBTiles first
-            let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("TileRegions")
+            guard let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("TileRegions") else {
+                addOnlineSource(to: style)
+                return
+            }
             if let files = try? FileManager.default.contentsOfDirectory(at: docsDir, includingPropertiesForKeys: nil),
                let first = files.first(where: { $0.pathExtension == "mbtiles" }) {
                 let mbtURL = first.absoluteString
@@ -126,6 +129,10 @@ struct DogMapView: UIViewRepresentable {
             }
 
             // Online fallback
+            addOnlineSource(to: style)
+        }
+
+        private func addOnlineSource(to style: MLNStyle) {
             let source = MLNRasterTileSource(
                 identifier: "usgs-topo",
                 tileURLTemplates: [

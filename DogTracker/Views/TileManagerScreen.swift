@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import MapLibre
 
 struct TileManagerScreen: View {
     @Query(sort: \TileRegion.downloadedAt, order: .reverse) private var regions: [TileRegion]
@@ -43,11 +44,10 @@ struct TileManagerScreen: View {
     }
 
     private func deleteRegions(at offsets: IndexSet) {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("TileRegions") else { return }
         for i in offsets {
             let region = regions[i]
-            // Delete the MBTiles file
-            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("TileRegions")
             let file = dir.appendingPathComponent(region.filename)
             try? FileManager.default.removeItem(at: file)
             modelContext.delete(region)
@@ -76,93 +76,138 @@ private struct TileRegionRow: View {
     }
 }
 
-// MARK: - Download sheet
+// MARK: - Map-based download sheet
 
 struct TileDownloadSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     @State private var regionName = ""
-    @State private var minLat = ""
-    @State private var maxLat = ""
-    @State private var minLon = ""
-    @State private var maxLon = ""
     @State private var minZoom = 10
     @State private var maxZoom = 15
     @State private var isDownloading = false
     @State private var progress = 0
     @State private var total = 0
     @State private var errorMessage: String?
+    /// Bounding box derived from the visible map region.
+    @State private var visibleBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Region") {
-                    TextField("Name (e.g. Yellowstone)", text: $regionName)
-                }
-                Section("Bounding Box") {
-                    TextField("Min Latitude", text: $minLat)
-                        .keyboardType(.decimalPad)
-                    TextField("Max Latitude", text: $maxLat)
-                        .keyboardType(.decimalPad)
-                    TextField("Min Longitude", text: $minLon)
-                        .keyboardType(.decimalPad)
-                    TextField("Max Longitude", text: $maxLon)
-                        .keyboardType(.decimalPad)
-                }
-                Section("Zoom Levels") {
-                    Stepper("Min zoom: \(minZoom)", value: $minZoom, in: 1...16)
-                    Stepper("Max zoom: \(maxZoom)", value: $maxZoom, in: minZoom...16)
-                    Text(estimatedInfo)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if isDownloading {
-                    Section("Progress") {
-                        ProgressView(value: Double(progress), total: Double(max(total, 1)))
-                        Text("\(progress)/\(total) tiles")
-                            .font(.caption.monospaced())
-                    }
-                }
-                if let err = errorMessage {
-                    Section {
-                        Text(err).foregroundStyle(.red)
-                    }
-                }
+            VStack(spacing: 0) {
+                mapSection
+                controlsSection
             }
             .navigationTitle("Download Region")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Download") { startDownload() }
-                        .disabled(!canDownload)
+                        .disabled(isDownloading)
                 }
             }
         }
     }
 
+    // MARK: - Map
+
+    private var mapSection: some View {
+        ZStack {
+            RegionPickerMap(onBoundsChanged: { bounds in
+                visibleBounds = bounds
+            })
+            .ignoresSafeArea(edges: .horizontal)
+
+            // Crosshair overlay showing the download region
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor, lineWidth: 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.accentColor.opacity(0.08))
+                )
+                .padding(24)
+                .allowsHitTesting(false)
+
+            VStack {
+                Text("Pan & zoom to select area")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                Spacer()
+            }
+            .padding(.top, 8)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: - Controls
+
+    private var controlsSection: some View {
+        VStack(spacing: 12) {
+            TextField("Region name (e.g. Yellowstone)", text: $regionName)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Text("Zoom")
+                    .font(.subheadline)
+                Spacer()
+                Stepper("Min \(minZoom)", value: $minZoom, in: 1...maxZoom)
+                    .fixedSize()
+            }
+            HStack {
+                Spacer()
+                Stepper("Max \(maxZoom)", value: $maxZoom, in: minZoom...16)
+                    .fixedSize()
+            }
+
+            Text(estimatedInfo)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if isDownloading {
+                ProgressView(value: Double(progress), total: Double(max(total, 1)))
+                Text("\(progress)/\(total) tiles")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if let err = errorMessage {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+
+            Button {
+                startDownload()
+            } label: {
+                Label(isDownloading ? "Downloading…" : "Download Tiles",
+                      systemImage: "arrow.down.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canDownload)
+        }
+        .padding()
+        .background(.bar)
+    }
+
+    // MARK: - Logic
+
     private var canDownload: Bool {
-        !regionName.isEmpty && !isDownloading &&
-        Double(minLat) != nil && Double(maxLat) != nil &&
-        Double(minLon) != nil && Double(maxLon) != nil
+        !regionName.isEmpty && !isDownloading && visibleBounds != nil
     }
 
     private var estimatedInfo: String {
-        guard let mnLa = Double(minLat), let mxLa = Double(maxLat),
-              let mnLo = Double(minLon), let mxLo = Double(maxLon) else {
-            return "Enter coordinates to see estimate"
+        guard let b = visibleBounds else {
+            return "Move the map to see estimate"
         }
         var count = 0
         for z in minZoom...maxZoom {
-            let n = 1 << z
-            let xRange = tileX(lon: mnLo, zoom: z)...tileX(lon: mxLo, zoom: z)
-            let yRange = tileY(lat: mxLa, zoom: z)...tileY(lat: mnLa, zoom: z)
-            count += (xRange.count) * (yRange.count)
+            let xRange = tileX(lon: b.minLon, zoom: z)...tileX(lon: b.maxLon, zoom: z)
+            let yRange = tileY(lat: b.maxLat, zoom: z)...tileY(lat: b.minLat, zoom: z)
+            count += xRange.count * yRange.count
         }
-        let estMB = Double(count) * 30 / 1024 // ~30 KB per tile avg
+        let estMB = Double(count) * 30 / 1024
         return "~\(count) tiles, est. \(Int(estMB)) MB"
     }
 
@@ -178,16 +223,16 @@ struct TileDownloadSheet: View {
     }
 
     private func startDownload() {
-        guard let mnLa = Double(minLat), let mxLa = Double(maxLat),
-              let mnLo = Double(minLon), let mxLo = Double(maxLon) else { return }
-
+        guard let b = visibleBounds else { return }
         isDownloading = true
         errorMessage = nil
 
         Task {
             do {
-                let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                    .appendingPathComponent("TileRegions")
+                guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                    .appendingPathComponent("TileRegions") else {
+                    throw TileDownloadError.noDocumentsDirectory
+                }
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
                 let filename = "\(regionName.replacingOccurrences(of: " ", with: "_"))_\(Int(Date().timeIntervalSince1970)).mbtiles"
@@ -195,8 +240,8 @@ struct TileDownloadSheet: View {
 
                 let downloader = TileDownloader()
                 let size = try await downloader.download(
-                    minLat: mnLa, maxLat: mxLa,
-                    minLon: mnLo, maxLon: mxLo,
+                    minLat: b.minLat, maxLat: b.maxLat,
+                    minLon: b.minLon, maxLon: b.maxLon,
                     minZoom: minZoom, maxZoom: maxZoom,
                     outputURL: fileURL
                 ) { done, tot in
@@ -209,8 +254,8 @@ struct TileDownloadSheet: View {
                 let region = TileRegion(
                     name: regionName,
                     filename: filename,
-                    minLatitude: mnLa, maxLatitude: mxLa,
-                    minLongitude: mnLo, maxLongitude: mxLo,
+                    minLatitude: b.minLat, maxLatitude: b.maxLat,
+                    minLongitude: b.minLon, maxLongitude: b.maxLon,
                     minZoom: minZoom, maxZoom: maxZoom,
                     sizeBytes: size
                 )
@@ -221,6 +266,79 @@ struct TileDownloadSheet: View {
                 errorMessage = error.localizedDescription
                 isDownloading = false
             }
+        }
+    }
+}
+
+// MARK: - Region picker map (UIViewRepresentable)
+
+/// A plain MapLibre map used to select a download region.
+/// Reports the visible bounding box whenever the user finishes panning/zooming.
+private struct RegionPickerMap: UIViewRepresentable {
+    let onBoundsChanged: ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void
+
+    func makeUIView(context: Context) -> MLNMapView {
+        let map = MLNMapView(frame: .zero)
+        map.delegate = context.coordinator
+        map.showsUserLocation = true
+        map.setZoomLevel(10, animated: false)
+
+        // Add online USGS topo so the user can see what they're downloading
+        return map
+    }
+
+    func updateUIView(_ uiView: MLNMapView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onBoundsChanged: onBoundsChanged)
+    }
+
+    class Coordinator: NSObject, MLNMapViewDelegate {
+        let onBoundsChanged: ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void
+        private var tileSourceAdded = false
+
+        init(onBoundsChanged: @escaping ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void) {
+            self.onBoundsChanged = onBoundsChanged
+        }
+
+        func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            guard !tileSourceAdded else { return }
+            tileSourceAdded = true
+            let source = MLNRasterTileSource(
+                identifier: "usgs-topo",
+                tileURLTemplates: [
+                    "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"
+                ],
+                options: [
+                    .tileSize: 256,
+                    .minimumZoomLevel: 1,
+                    .maximumZoomLevel: 16,
+                ]
+            )
+            style.addSource(source)
+            style.addLayer(MLNRasterStyleLayer(identifier: "usgs-topo-layer", source: source))
+        }
+
+        func mapViewRegionIsChanging(_ mapView: MLNMapView) {
+            reportBounds(mapView)
+        }
+
+        func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
+            reportBounds(mapView)
+        }
+
+        private func reportBounds(_ mapView: MLNMapView) {
+            let bounds = mapView.visibleCoordinateBounds
+            // Account for the 24pt inset of the overlay rectangle
+            let inset: CGFloat = 24
+            let size = mapView.bounds.insetBy(dx: inset, dy: inset)
+            let nw = mapView.convert(CGPoint(x: size.minX, y: size.minY), toCoordinateFrom: mapView)
+            let se = mapView.convert(CGPoint(x: size.maxX, y: size.maxY), toCoordinateFrom: mapView)
+            let minLat = min(nw.latitude, se.latitude)
+            let maxLat = max(nw.latitude, se.latitude)
+            let minLon = min(nw.longitude, se.longitude)
+            let maxLon = max(nw.longitude, se.longitude)
+            onBoundsChanged((minLat, maxLat, minLon, maxLon))
         }
     }
 }
