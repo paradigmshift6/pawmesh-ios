@@ -303,5 +303,28 @@ final class MeshService {
         } catch {
             log.error("failed to save fix: \(error.localizedDescription)")
         }
+
+        // Prune old fixes: cap at 2000 per tracker
+        pruneOldFixes(trackerNodeNum: nodeNum, context: context)
+    }
+
+    /// Delete oldest fixes when a tracker exceeds 2000 stored fixes.
+    private func pruneOldFixes(trackerNodeNum: UInt32, context: ModelContext) {
+        let descriptor = FetchDescriptor<Fix>(
+            predicate: #Predicate { $0.tracker?.nodeNum == trackerNodeNum },
+            sortBy: [SortDescriptor(\.fixTime, order: .reverse)]
+        )
+        do {
+            let allFixes = try context.fetch(descriptor)
+            let maxFixes = 2000
+            guard allFixes.count > maxFixes else { return }
+            for fix in allFixes[maxFixes...] {
+                context.delete(fix)
+            }
+            try context.save()
+            log.info("pruned \(allFixes.count - maxFixes) old fixes for node \(trackerNodeNum, format: .hex)")
+        } catch {
+            log.error("failed to prune fixes: \(error.localizedDescription)")
+        }
     }
 }

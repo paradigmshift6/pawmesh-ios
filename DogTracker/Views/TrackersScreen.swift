@@ -372,6 +372,7 @@ private struct PhotoCropView: View {
     }
 
     private func cropAndFinish() {
+        guard image.size.height > 0 else { return }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: outputSize, height: outputSize))
         let cropped = renderer.image { ctx in
             let drawSize = cropDiameter * scale

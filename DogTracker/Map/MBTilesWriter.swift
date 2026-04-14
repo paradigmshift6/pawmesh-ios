@@ -32,8 +32,20 @@ final class MBTilesWriter: @unchecked Sendable {
 
     /// Write metadata key/value pairs.
     func writeMetadata(_ meta: [(String, String)]) throws {
+        let sql = "INSERT OR REPLACE INTO metadata (name, value) VALUES (?, ?)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MBTilesError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
         for (name, value) in meta {
-            try execute("INSERT OR REPLACE INTO metadata (name, value) VALUES ('\(name)', '\(value)')")
+            sqlite3_bind_text(stmt, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(stmt, 2, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw MBTilesError.insertFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            sqlite3_reset(stmt)
         }
     }
 

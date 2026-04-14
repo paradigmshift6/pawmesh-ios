@@ -90,10 +90,26 @@ enum ChannelManager {
     }
 
     static func savePSK(_ psk: Data) {
-        UserDefaults.standard.set(psk, forKey: pskKey)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: pskKey,
+            kSecAttrService as String: "com.levijohnson.DogTracker.channel",
+        ]
+        SecItemDelete(query as CFDictionary)
+        var add = query
+        add[kSecValueData as String] = psk
+        SecItemAdd(add as CFDictionary, nil)
     }
 
     static func loadPSK() -> Data? {
-        UserDefaults.standard.data(forKey: pskKey)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: pskKey,
+            kSecAttrService as String: "com.levijohnson.DogTracker.channel",
+            kSecReturnData as String: true,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 }

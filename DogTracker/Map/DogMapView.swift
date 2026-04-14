@@ -61,6 +61,10 @@ struct DogMapView: UIViewRepresentable {
             )
         }
 
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
         /// Remove the tile source before the mbtiles file is deleted to prevent
         /// MapLibre's SQLite handle from crashing on a deleted vnode.
         @objc private func handleWillDeleteTiles() {

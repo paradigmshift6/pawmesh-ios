@@ -53,6 +53,13 @@ struct CompassScreen: View {
     // MARK: - Compass
 
     @ViewBuilder private var compassBody: some View {
+        if trackers.isEmpty {
+            ContentUnavailableView(
+                "No dogs assigned",
+                systemImage: "pawprint",
+                description: Text("Assign a tracker as a dog first.")
+            )
+        } else {
         let safeIndex = min(max(selectedIndex, 0), trackers.count - 1)
         let tracker = trackers[safeIndex]
         let node = mesh.nodes[tracker.nodeNum]
@@ -88,6 +95,7 @@ struct CompassScreen: View {
                     : "Waiting for GPS fix from \(tracker.name)."
                 )
             )
+        }
         }
     }
 
