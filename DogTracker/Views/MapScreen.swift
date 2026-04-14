@@ -7,6 +7,7 @@ struct MapScreen: View {
     @Environment(MeshService.self) private var mesh
     @Environment(UnitSettings.self) private var units
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
+    @Query(sort: \Fix.fixTime) private var allFixes: [Fix]
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
 
@@ -30,8 +31,16 @@ struct MapScreen: View {
     // MARK: - Trails
 
     private var dogTrails: [DogTrail] {
-        trackers.compactMap { tracker -> DogTrail? in
-            let fixes = tracker.fixes.sorted { $0.fixTime < $1.fixTime }
+        // Group fixes by tracker nodeNum using the @Query'd allFixes
+        // (accessing tracker.fixes via the relationship doesn't trigger
+        // SwiftUI updates, so we query Fix directly instead).
+        let trackerMap = Dictionary(uniqueKeysWithValues: trackers.map { ($0.nodeNum, $0) })
+        let grouped = Dictionary(grouping: allFixes.filter { $0.tracker != nil }) {
+            $0.tracker!.nodeNum
+        }
+        return trackers.compactMap { tracker -> DogTrail? in
+            guard trackerMap[tracker.nodeNum] != nil else { return nil }
+            let fixes = (grouped[tracker.nodeNum] ?? []).sorted { $0.fixTime < $1.fixTime }
             guard fixes.count >= 2 else { return nil }
             let coords = fixes.map { (lat: $0.latitude, lon: $0.longitude) }
             return DogTrail(nodeNum: tracker.nodeNum, colorHex: tracker.colorHex, coordinates: coords)
