@@ -29,8 +29,10 @@ final class RadioController {
     private var userDisconnected = false
     /// How many consecutive reconnect attempts have failed.
     private var reconnectAttempts = 0
+    /// Whether the last failure was an encryption/connect error (stale peripheral).
+    private var lastFailWasEncryption = false
     /// Max direct UUID reconnect attempts before falling back to scan.
-    private static let maxDirectAttempts = 3
+    private static let maxDirectAttempts = 2
 
     private static let savedPeripheralKey = "lastConnectedPeripheralUUID"
 
@@ -145,14 +147,22 @@ final class RadioController {
     private func handle(_ event: RadioEvent) {
         switch event {
         case .stateChanged(let s):
+            let prev = connectionState
             connectionState = s
 
             if case .connected = s {
                 reconnectTask?.cancel()
-                reconnectAttempts = 0  // reset on successful connection
+                reconnectAttempts = 0
+                lastFailWasEncryption = false
             } else if case .disconnected = s {
+                // Detect encryption failures — the disconnect reason contains
+                // "encrypt" when CoreBluetooth can't establish the encrypted link.
+                // These need a scan-based reconnect (stale peripheral reference).
+                if case .connecting = prev {
+                    // Failed during connect phase = likely encryption issue
+                    lastFailWasEncryption = true
+                }
                 configComplete = false
-                // Auto-reconnect on unexpected disconnect
                 if !userDisconnected {
                     scheduleReconnect()
                 }
@@ -169,44 +179,51 @@ final class RadioController {
     }
 
     /// After an unexpected disconnect, wait then try to reconnect.
-    /// Uses exponential backoff: 3s → 5s → 10s.
-    /// After `maxDirectAttempts` consecutive failures, falls back to scanning
-    /// and auto-connecting to the first Meshtastic device found.
+    ///
+    /// Strategy:
+    /// - Normal disconnect (e.g., timeout during config): try direct UUID reconnect
+    ///   up to `maxDirectAttempts` times with backoff.
+    /// - Encryption failure (stale BLE peripheral): skip directly to scan-based
+    ///   reconnect to get a fresh `CBPeripheral` reference.
+    /// - Scan-based: scans for the saved UUID, waits up to 15s, auto-connects
+    ///   if found.
     private func scheduleReconnect() {
         guard let uuidString = UserDefaults.standard.string(forKey: Self.savedPeripheralKey),
               let uuid = UUID(uuidString: uuidString) else { return }
 
         reconnectAttempts += 1
         let attempt = reconnectAttempts
+        let needsScan = lastFailWasEncryption || attempt > Self.maxDirectAttempts
 
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             guard let self else { return }
 
-            if attempt <= Self.maxDirectAttempts {
-                // Direct UUID reconnect with backoff: 3s, 5s, 10s
-                let delay = attempt <= 1 ? 3 : (attempt <= 2 ? 5 : 10)
+            if !needsScan {
+                // Direct UUID reconnect with backoff: 3s, 6s
+                let delay = attempt <= 1 ? 3 : 6
                 print("[Radio] reconnect attempt \(attempt)/\(Self.maxDirectAttempts) in \(delay)s (direct UUID)")
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled else { return }
                 await self.radio.connectByUUID(uuid)
             } else {
-                // Direct UUID failed repeatedly — fall back to scan-based reconnect.
-                // This gets a fresh CBPeripheral reference and avoids stale BLE state.
-                print("[Radio] direct reconnect failed \(Self.maxDirectAttempts) times, falling back to scan")
+                // Scan-based reconnect — gets a fresh CBPeripheral reference
+                // which fixes stale encryption state.
+                print("[Radio] scan-based reconnect (attempt \(attempt), encryption fail: \(self.lastFailWasEncryption))")
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
 
+                self.lastFailWasEncryption = false
                 await self.radio.startScan()
 
-                // Wait up to 15 seconds for the device to appear in scan results
+                // Wait up to 15 seconds for our specific device to appear
                 for _ in 0..<30 {
                     try? await Task.sleep(for: .milliseconds(500))
                     guard !Task.isCancelled else { return }
 
-                    // Look for our saved peripheral in discovered list
                     if let found = self.discovered.first(where: { $0.id == uuid }) {
                         print("[Radio] found \(found.name) via scan, reconnecting")
+                        await self.radio.stopScan()
                         self.reconnectAttempts = 0
                         self.connect(uuid)
                         return
@@ -214,7 +231,6 @@ final class RadioController {
                 }
 
                 // Didn't find it — stop scanning, stay disconnected.
-                // User can manually tap "Scan for Radios".
                 print("[Radio] device not found after scan, giving up auto-reconnect")
                 await self.radio.stopScan()
             }

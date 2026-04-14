@@ -186,8 +186,15 @@ extension BLERadioTransport: CBCentralManagerDelegate {
         error: Error?
     ) {
         let msg = error?.localizedDescription ?? "failed to connect"
-        log.error("\(msg)")
-        continuation.yield(.error(msg))
+        log.error("BLE failed to connect: \(msg)")
+        // Clean up state exactly like didDisconnect so the reconnect
+        // logic can proceed — without this the state machine gets stuck
+        // at .connecting and no reconnect ever fires.
+        self.peripheral = nil
+        self.toRadioChar = nil
+        self.fromRadioChar = nil
+        self.fromNumChar = nil
+        continuation.yield(.disconnected(reason: msg))
     }
 
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
