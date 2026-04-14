@@ -32,6 +32,10 @@ final class RadioController {
     private var reconnectTask: Task<Void, Never>?
     /// Whether the user explicitly disconnected (suppress auto-reconnect).
     private var userDisconnected = false
+    /// When true, disconnect events do NOT trigger automatic reconnection.
+    /// Used by OnboardingManager while switching between companion and tracker
+    /// so we don't bounce back to the companion during tracker scan.
+    var suppressAutoReconnect: Bool = false
     /// How many consecutive reconnect attempts have failed.
     private var reconnectAttempts = 0
     /// Whether the last failure was an encryption/connect error (stale peripheral).
@@ -188,8 +192,10 @@ final class RadioController {
                     lastFailWasEncryption = true
                 }
                 configComplete = false
-                if !userDisconnected {
+                if !userDisconnected && !suppressAutoReconnect {
                     scheduleReconnect()
+                } else if suppressAutoReconnect {
+                    print("[Radio] disconnect with auto-reconnect suppressed (onboarding)")
                 }
             }
         case .discovered(let list):

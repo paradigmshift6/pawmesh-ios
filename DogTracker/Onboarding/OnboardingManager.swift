@@ -75,6 +75,7 @@ final class OnboardingManager {
             step = .connectTracker
             // Disconnect from companion, start scanning for tracker
             companionPeripheralUUID = savedCompanionUUID
+            radio.suppressAutoReconnect = true
             radio.disconnectForSwitch()
             // Small delay then scan
             Task {
@@ -106,6 +107,7 @@ final class OnboardingManager {
     /// User chose to add another tracker from the addMoreTrackers step.
     func addAnotherTracker() {
         step = .connectTracker
+        radio.suppressAutoReconnect = true
         radio.disconnectForSwitch()
         Task {
             try? await Task.sleep(for: .seconds(1))
@@ -126,6 +128,11 @@ final class OnboardingManager {
             companionPeripheralUUID = uuid
         }
         step = .connectTracker
+        // Suppress auto-reconnect — otherwise the disconnect below fires
+        // scheduleReconnect() which bounces right back to the companion
+        // (its UUID is still in UserDefaults), and the next configComplete
+        // advances us to .nameTracker while pointed at the companion.
+        radio.suppressAutoReconnect = true
         radio.disconnectForSwitch()
         Task {
             try? await Task.sleep(for: .seconds(1))
@@ -140,6 +147,9 @@ final class OnboardingManager {
         if let uuid = companionPeripheralUUID {
             UserDefaults.standard.set(uuid.uuidString, forKey: "lastConnectedPeripheralUUID")
         }
+        // Re-enable auto-reconnect before asking the radio to connect —
+        // otherwise a dropped link during reboot wouldn't recover.
+        radio.suppressAutoReconnect = false
         // Reconnect to companion
         reconnectCompanion()
         // Mark onboarding as complete and stop observing radio events
@@ -150,6 +160,7 @@ final class OnboardingManager {
     /// Skip onboarding entirely (already configured).
     func skip() {
         step = .complete
+        radio.suppressAutoReconnect = false
         UserDefaults.standard.set(true, forKey: "onboardingComplete")
         stopObserving()
     }
