@@ -27,6 +27,10 @@ final class RadioController {
     private var reconnectTask: Task<Void, Never>?
     /// Whether the user explicitly disconnected (suppress auto-reconnect).
     private var userDisconnected = false
+    /// How many consecutive reconnect attempts have failed.
+    private var reconnectAttempts = 0
+    /// Max direct UUID reconnect attempts before falling back to scan.
+    private static let maxDirectAttempts = 3
 
     private static let savedPeripheralKey = "lastConnectedPeripheralUUID"
 
@@ -75,6 +79,39 @@ final class RadioController {
         }
     }
 
+    // MARK: - Foreground/background
+
+    /// Call when the app returns to the foreground. If the connection dropped
+    /// while suspended, resets the retry counter and kicks off a fresh reconnect.
+    func handleReturnToForeground() {
+        guard !userDisconnected else { return }
+
+        switch connectionState {
+        case .connected:
+            // Still connected — nothing to do
+            break
+        case .disconnected, .failed:
+            // Connection dropped while suspended — retry from scratch.
+            print("[Radio] returned to foreground while disconnected, reconnecting")
+            reconnectAttempts = 0
+            reconnectTask?.cancel()
+            autoReconnect()
+        case .connecting, .configuring, .scanning:
+            // Already mid-connect. If it's been stuck for a while (timer froze
+            // in background), cancel and retry.
+            print("[Radio] returned to foreground in state \(connectionState), restarting connect")
+            reconnectTask?.cancel()
+            reconnectAttempts = 0
+            Task {
+                await radio.disconnect()
+                try? await Task.sleep(for: .milliseconds(500))
+                autoReconnect()
+            }
+        case .bluetoothUnavailable:
+            break
+        }
+    }
+
     // MARK: - Commands
 
     func startScan()      { Task { await radio.startScan() } }
@@ -112,6 +149,7 @@ final class RadioController {
 
             if case .connected = s {
                 reconnectTask?.cancel()
+                reconnectAttempts = 0  // reset on successful connection
             } else if case .disconnected = s {
                 configComplete = false
                 // Auto-reconnect on unexpected disconnect
@@ -130,17 +168,56 @@ final class RadioController {
         }
     }
 
-    /// After an unexpected disconnect, wait a few seconds then try to reconnect.
+    /// After an unexpected disconnect, wait then try to reconnect.
+    /// Uses exponential backoff: 3s → 5s → 10s.
+    /// After `maxDirectAttempts` consecutive failures, falls back to scanning
+    /// and auto-connecting to the first Meshtastic device found.
     private func scheduleReconnect() {
         guard let uuidString = UserDefaults.standard.string(forKey: Self.savedPeripheralKey),
               let uuid = UUID(uuidString: uuidString) else { return }
 
+        reconnectAttempts += 1
+        let attempt = reconnectAttempts
+
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
-            // Wait before reconnecting to avoid rapid retry loops
-            try? await Task.sleep(for: .seconds(3))
-            guard let self, !Task.isCancelled else { return }
-            await self.radio.connectByUUID(uuid)
+            guard let self else { return }
+
+            if attempt <= Self.maxDirectAttempts {
+                // Direct UUID reconnect with backoff: 3s, 5s, 10s
+                let delay = attempt <= 1 ? 3 : (attempt <= 2 ? 5 : 10)
+                print("[Radio] reconnect attempt \(attempt)/\(Self.maxDirectAttempts) in \(delay)s (direct UUID)")
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                await self.radio.connectByUUID(uuid)
+            } else {
+                // Direct UUID failed repeatedly — fall back to scan-based reconnect.
+                // This gets a fresh CBPeripheral reference and avoids stale BLE state.
+                print("[Radio] direct reconnect failed \(Self.maxDirectAttempts) times, falling back to scan")
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+
+                await self.radio.startScan()
+
+                // Wait up to 15 seconds for the device to appear in scan results
+                for _ in 0..<30 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !Task.isCancelled else { return }
+
+                    // Look for our saved peripheral in discovered list
+                    if let found = self.discovered.first(where: { $0.id == uuid }) {
+                        print("[Radio] found \(found.name) via scan, reconnecting")
+                        self.reconnectAttempts = 0
+                        self.connect(uuid)
+                        return
+                    }
+                }
+
+                // Didn't find it — stop scanning, stay disconnected.
+                // User can manually tap "Scan for Radios".
+                print("[Radio] device not found after scan, giving up auto-reconnect")
+                await self.radio.stopScan()
+            }
         }
     }
 }

@@ -122,14 +122,22 @@ final class OnboardingManager {
         }
         // Reconnect to companion
         reconnectCompanion()
-        // Mark onboarding as complete
+        // Mark onboarding as complete and stop observing radio events
         UserDefaults.standard.set(true, forKey: "onboardingComplete")
+        stopObserving()
     }
 
     /// Skip onboarding entirely (already configured).
     func skip() {
         step = .complete
         UserDefaults.standard.set(true, forKey: "onboardingComplete")
+        stopObserving()
+    }
+
+    /// Stop observing radio events. Called when onboarding is done.
+    func stopObserving() {
+        consumer?.cancel()
+        consumer = nil
     }
 
     // MARK: - Connection handling
@@ -340,6 +348,7 @@ final class OnboardingManager {
             ConfigItem(label: "Device role (tracker)", done: false),
             ConfigItem(label: "GPS & position broadcasting", done: false),
             ConfigItem(label: "LoRa radio", done: false),
+            ConfigItem(label: "Disable position on primary channel", done: false),
             ConfigItem(label: "Private channel (full precision)", done: false),
             ConfigItem(label: "Saving", done: false),
         ])
@@ -397,6 +406,14 @@ final class OnboardingManager {
             lora.hopLimit = 3
             lora.txEnabled = true
             try await configurator.setLoRaConfig(lora, on: nodeNum)
+            markProgress(idx); idx += 1
+            try await Task.sleep(for: .milliseconds(500))
+
+            // Disable position on primary channel (ch0) so tracker only
+            // broadcasts positions on DogTrk (ch1) with full precision.
+            // Uses PSK=0x01 which is Meshtastic's shorthand for the default key.
+            let ch0 = ChannelManager.primaryChannelPositionDisabled()
+            try await configurator.setChannel(ch0, on: nodeNum)
             markProgress(idx); idx += 1
             try await Task.sleep(for: .milliseconds(500))
 

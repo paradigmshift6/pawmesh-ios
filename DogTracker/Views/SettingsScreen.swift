@@ -7,7 +7,12 @@ struct SettingsScreen: View {
     @Environment(UnitSettings.self) private var units
     @Environment(\.modelContext) private var modelContext
     @Query private var fixes: [Fix]
+    @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @State private var showTrackerSetup = false
+    @State private var resetTarget: ResetTarget?
+    @State private var showResetConfirm = false
+    @State private var isResetting = false
+    @State private var resetResult: String?
 
     var body: some View {
         NavigationStack {
@@ -15,6 +20,7 @@ struct SettingsScreen: View {
                 radioSection
                 unitsSection
                 deviceSetupSection
+                factoryResetSection
                 meshSection
                 historySection
                 aboutSection
@@ -22,6 +28,29 @@ struct SettingsScreen: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showTrackerSetup) {
                 TrackerSetupSheet(radio: radio, modelContainer: modelContext.container)
+            }
+            .confirmationDialog(
+                "Factory Reset \(resetTarget?.label ?? "Device")?",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Reset Config (keep BLE bonds)", role: .destructive) {
+                    performReset(preserveBLE: true)
+                }
+                Button("Full Factory Reset", role: .destructive) {
+                    performReset(preserveBLE: false)
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will erase all configuration on the device and restore factory defaults. The device will reboot.")
+            }
+            .alert("Factory Reset", isPresented: .init(
+                get: { resetResult != nil },
+                set: { if !$0 { resetResult = nil } }
+            )) {
+                Button("OK") { resetResult = nil }
+            } message: {
+                Text(resetResult ?? "")
             }
         }
     }
@@ -103,6 +132,99 @@ struct SettingsScreen: View {
         }
     }
 
+    // MARK: - Factory Reset
+
+    private var factoryResetSection: some View {
+        Section {
+            if isConnected {
+                // Companion (currently connected device)
+                let nodeNum = mesh.myNodeNum
+                let companionName = mesh.nodes[nodeNum]?.longName
+                    ?? String(format: "!%08x", nodeNum)
+
+                resetButton(
+                    label: "Companion",
+                    name: companionName,
+                    nodeNum: nodeNum,
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    detail: "connected"
+                )
+
+                // Tracked dogs only (not all mesh nodes)
+                ForEach(trackers) { tracker in
+                    let trackerName = mesh.nodes[tracker.nodeNum]?.longName ?? tracker.name
+                    resetButton(
+                        label: tracker.name,
+                        name: trackerName,
+                        nodeNum: tracker.nodeNum,
+                        systemImage: "pawprint.fill",
+                        detail: "via mesh"
+                    )
+                }
+            } else {
+                Text("Connect to a device to factory reset it.")
+                    .foregroundStyle(.secondary)
+            }
+
+            if isResetting {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Sending reset command…")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Factory Reset")
+        } footer: {
+            Text("Resets all configuration to factory defaults. The device will reboot and need to be set up again.")
+        }
+    }
+
+    private func resetButton(label: String, name: String, nodeNum: UInt32, systemImage: String, detail: String) -> some View {
+        Button(role: .destructive) {
+            resetTarget = ResetTarget(nodeNum: nodeNum, label: label)
+            showResetConfirm = true
+        } label: {
+            HStack {
+                Label("Reset \(label)", systemImage: systemImage)
+                Spacer()
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .disabled(isResetting)
+    }
+
+    private var isConnected: Bool {
+        if case .connected = radio.connectionState { return true }
+        return false
+    }
+
+    private func performReset(preserveBLE: Bool) {
+        guard let target = resetTarget else { return }
+        isResetting = true
+        let configurator = DeviceConfigurator(radio: radio.radio)
+        Task {
+            do {
+                // For remote nodes, use a hop limit > 0
+                let isLocal = target.nodeNum == mesh.myNodeNum
+                if isLocal {
+                    try await configurator.factoryReset(nodeNum: target.nodeNum, preserveBLE: preserveBLE)
+                } else {
+                    try await configurator.factoryResetRemote(nodeNum: target.nodeNum, preserveBLE: preserveBLE)
+                }
+                isResetting = false
+                resetResult = "\(target.label) has been sent a factory reset command. It will reboot momentarily."
+                // If we reset the connected device, it will disconnect on its own
+            } catch {
+                isResetting = false
+                resetResult = "Reset failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func clearHistory() {
         for fix in fixes {
             modelContext.delete(fix)
@@ -111,9 +233,14 @@ struct SettingsScreen: View {
     }
 }
 
+private struct ResetTarget {
+    let nodeNum: UInt32
+    let label: String
+}
+
 // MARK: - Tracker setup sheet (add tracker after onboarding)
 
-private struct TrackerSetupSheet: View {
+struct TrackerSetupSheet: View {
     let radio: RadioController
     let modelContainer: ModelContainer
     @Environment(\.dismiss) private var dismiss

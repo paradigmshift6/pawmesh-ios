@@ -33,6 +33,27 @@ enum ChannelManager {
         }
     }
 
+    /// Create a primary channel (index 0) that preserves the default PSK but
+    /// disables position broadcasting. This forces the tracker to only
+    /// broadcast positions on the DogTrk secondary channel (positionPrecision=32).
+    ///
+    /// Meshtastic interprets a 1-byte PSK of `0x01` as "use the built-in
+    /// default AES key", so this preserves normal encryption on channel 0.
+    static func primaryChannelPositionDisabled() -> Channel {
+        var modSettings = ModuleSettings()
+        modSettings.positionPrecision = 0  // disable position on this channel
+
+        var settings = ChannelSettings()
+        settings.psk = Data([1])  // Meshtastic default PSK shorthand
+        settings.moduleSettings = modSettings
+
+        var channel = Channel()
+        channel.index = 0
+        channel.role = .primary
+        channel.settings = settings
+        return channel
+    }
+
     /// Extract and save the PSK from an existing channel config (e.g., read
     /// from a device that was already configured).
     static func adoptPSK(from channels: [Int32: Channel]) {

@@ -163,7 +163,13 @@ actor DeviceConfigurator {
         try await setLoRaConfig(lora, on: nodeNum)
         try await Task.sleep(for: .milliseconds(200))
 
-        // Same private channel as companion
+        // Disable position on primary channel so tracker only broadcasts
+        // on the private channel with full precision
+        let ch0 = ChannelManager.primaryChannelPositionDisabled()
+        try await setChannel(ch0, on: nodeNum)
+        try await Task.sleep(for: .milliseconds(200))
+
+        // Same private channel as companion (full precision)
         try await setChannel(privateChannel, on: nodeNum)
         try await Task.sleep(for: .milliseconds(200))
 
@@ -171,10 +177,45 @@ actor DeviceConfigurator {
         log.info("tracker configuration committed on \(nodeNum, format: .hex)")
     }
 
+    // MARK: - Factory reset
+
+    /// Factory-reset a node. Wipes all config and state back to defaults.
+    /// `preserveBLE` keeps BLE bonds intact (uses `factoryResetConfig`);
+    /// otherwise does a full reset (uses `factoryResetDevice`).
+    func factoryReset(nodeNum: UInt32, preserveBLE: Bool = false) async throws {
+        var admin = AdminMessage()
+        if preserveBLE {
+            admin.payloadVariant = .factoryResetConfig(0)
+        } else {
+            admin.payloadVariant = .factoryResetDevice(0)
+        }
+        try await sendAdmin(admin, to: nodeNum, hopLimit: 0)
+        log.info("factory reset (preserveBLE=\(preserveBLE)) sent to \(nodeNum, format: .hex)")
+    }
+
+    /// Factory-reset a remote node (via mesh, hopLimit=3).
+    func factoryResetRemote(nodeNum: UInt32, preserveBLE: Bool = false) async throws {
+        var admin = AdminMessage()
+        if preserveBLE {
+            admin.payloadVariant = .factoryResetConfig(0)
+        } else {
+            admin.payloadVariant = .factoryResetDevice(0)
+        }
+        try await sendAdmin(admin, to: nodeNum, hopLimit: 3)
+        log.info("factory reset REMOTE (preserveBLE=\(preserveBLE)) sent to \(nodeNum, format: .hex)")
+    }
+
+    /// Reset the node database on a device.
+    func nodeDBReset(nodeNum: UInt32) async throws {
+        var admin = AdminMessage()
+        admin.payloadVariant = .nodedbReset(true)
+        try await sendAdmin(admin, to: nodeNum, hopLimit: 0)
+        log.info("nodeDB reset sent to \(nodeNum, format: .hex)")
+    }
+
     // MARK: - Private
 
     private func sendAdmin(_ admin: AdminMessage, to nodeNum: UInt32, hopLimit: UInt32) async throws {
-        let myNum = await radio.state == .disconnected ? nodeNum : nodeNum // addressed to target
         let payload = try admin.serializedData()
 
         var data = DataMessage()

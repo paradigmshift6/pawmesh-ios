@@ -1,24 +1,35 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import OSLog
 
 struct TrackersScreen: View {
     @Environment(MeshService.self) private var mesh
+    @Environment(RadioController.self) private var radio
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @State private var searchText = ""
+    @State private var showAllNodes = false
+    @State private var showTrackerSetup = false
+
+    /// How many mesh nodes to show before requiring "Show More"
+    private let previewNodeCount = 3
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Dogs")
                 .searchable(text: $searchText, prompt: "Search nodes")
+                .sheet(isPresented: $showTrackerSetup) {
+                    TrackerSetupSheet(radio: radio, modelContainer: modelContext.container)
+                }
         }
     }
 
     @ViewBuilder private var content: some View {
         List {
             assignedSection
+            addTrackerSection
             availableSection
         }
     }
@@ -40,6 +51,20 @@ struct TrackersScreen: View {
         }
     }
 
+    // MARK: - Add tracker
+
+    @ViewBuilder private var addTrackerSection: some View {
+        if trackers.count < 3 {
+            Section {
+                Button {
+                    showTrackerSetup = true
+                } label: {
+                    Label("Set Up New Tracker", systemImage: "plus.circle.fill")
+                }
+            }
+        }
+    }
+
     // MARK: - Available mesh nodes
 
     @ViewBuilder private var availableSection: some View {
@@ -52,9 +77,23 @@ struct TrackersScreen: View {
                     description: Text("Connect to your Meshtastic radio first, then mesh nodes will appear here.")
                 )
             } else {
-                ForEach(unassigned, id: \.num) { node in
+                let visible = showAllNodes ? unassigned : Array(unassigned.prefix(previewNodeCount))
+                ForEach(visible, id: \.num) { node in
                     MeshNodeRow(node: node, canAssign: trackers.count < 3) {
                         assignNode(node)
+                    }
+                }
+                if unassigned.count > previewNodeCount && !showAllNodes {
+                    Button {
+                        withAnimation { showAllNodes = true }
+                    } label: {
+                        HStack {
+                            Text("Show \(unassigned.count - previewNodeCount) more")
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -176,9 +215,22 @@ private struct MeshNodeRow: View {
 
 struct TrackerDetailScreen: View {
     @Bindable var tracker: Tracker
-    @State private var photoItem: PhotosPickerItem?
+    private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "Photo")
+
+    /// Single active sheet — avoids multiple `.sheet()` conflicts.
+    @State private var activeSheet: PhotoSheet?
     @State private var rawPhotoImage: UIImage?
-    @State private var showCropSheet = false
+
+    enum PhotoSheet: Identifiable {
+        case picker
+        case crop(UIImage)
+        var id: Int {
+            switch self {
+            case .picker: return 0
+            case .crop: return 1
+            }
+        }
+    }
 
     var body: some View {
         Form {
@@ -196,11 +248,24 @@ struct TrackerDetailScreen: View {
             }
         }
         .navigationTitle(tracker.name)
-        .sheet(isPresented: $showCropSheet) {
-            if let img = rawPhotoImage {
-                PhotoCropView(image: img) { cropped in
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .picker:
+                ImagePicker { image in
+                    log.info("photo picked: \(image.size.width)x\(image.size.height)")
+                    rawPhotoImage = image
+                    activeSheet = nil
+                    // Present crop after picker fully dismisses
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        activeSheet = .crop(image)
+                    }
+                }
+            case .crop(let image):
+                PhotoCropView(image: image) { cropped in
+                    log.info("photo cropped, saving JPEG")
                     tracker.photoData = cropped.jpegData(compressionQuality: 0.8)
-                    showCropSheet = false
+                    activeSheet = nil
                 }
             }
         }
@@ -214,16 +279,10 @@ struct TrackerDetailScreen: View {
                 .frame(maxHeight: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        PhotosPicker("Choose photo", selection: $photoItem, matching: .images)
-            .onChange(of: photoItem) { _, item in
-                Task {
-                    if let data = try? await item?.loadTransferable(type: Data.self),
-                       let img = UIImage(data: data) {
-                        rawPhotoImage = img
-                        showCropSheet = true
-                    }
-                }
-            }
+        Button("Choose photo") {
+            log.info("choose photo tapped")
+            activeSheet = .picker
+        }
         if tracker.photoData != nil {
             Button("Remove photo", role: .destructive) {
                 tracker.photoData = nil
@@ -250,48 +309,44 @@ private struct PhotoCropView: View {
     private let cropDiameter: CGFloat = 280
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            // Top bar (replaces NavigationStack toolbar to avoid scene issues)
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .foregroundStyle(.white)
                 Spacer()
-                ZStack {
-                    // Image behind the crop circle
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: cropDiameter, height: cropDiameter)
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .clipShape(Circle())
-                        .gesture(dragGesture)
-                        .gesture(pinchGesture)
+                Button("Use Photo") { cropAndFinish() }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+            }
+            .padding()
 
-                    // Circle border
-                    Circle()
-                        .stroke(Color.white, lineWidth: 3)
-                        .frame(width: cropDiameter, height: cropDiameter)
-                        .allowsHitTesting(false)
-                }
-                Text("Move and Scale")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 16)
-                Spacer()
+            Spacer()
+            ZStack {
+                // Image behind the crop circle
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: cropDiameter, height: cropDiameter)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .clipShape(Circle())
+                    .gesture(dragGesture)
+                    .gesture(pinchGesture)
+
+                // Circle border
+                Circle()
+                    .stroke(Color.white, lineWidth: 3)
+                    .frame(width: cropDiameter, height: cropDiameter)
+                    .allowsHitTesting(false)
             }
-            .background(Color.black)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Use Photo") { cropAndFinish() }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                }
-            }
-            .toolbarBackground(.hidden, for: .navigationBar)
+            Text("Move and Scale")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 16)
+            Spacer()
         }
+        .background(Color.black)
     }
 
     private var dragGesture: some Gesture {
@@ -360,6 +415,65 @@ private struct ColorHexPicker: View {
                     .frame(width: 28, height: 28)
                     .overlay(Circle().stroke(.primary.opacity(hex == color ? 1 : 0), lineWidth: 2))
                     .onTapGesture { hex = color }
+            }
+        }
+    }
+}
+
+// MARK: - PHPicker image picker (runs out-of-process, avoids sandbox issues)
+
+/// Wraps `PHPickerViewController` which runs in a separate process.
+/// Avoids the LaunchServices sandbox crash that SwiftUI's PhotosPicker
+/// and UIImagePickerController can trigger.
+private struct ImagePicker: UIViewControllerRepresentable {
+    let onPick: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+    private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "Photo")
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        config.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        log.info("PHPickerViewController created")
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: ImagePicker
+        private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "Photo")
+
+        init(_ parent: ImagePicker) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            log.info("picker finished with \(results.count) result(s)")
+            guard let result = results.first else {
+                log.info("picker cancelled")
+                parent.dismiss()
+                return
+            }
+
+            let provider = result.itemProvider
+            log.info("loading image from provider, canLoadUIImage=\(provider.canLoadObject(ofClass: UIImage.self))")
+
+            provider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
+                if let error {
+                    self?.log.error("image load error: \(error.localizedDescription)")
+                }
+                guard let image = object as? UIImage else {
+                    self?.log.error("loaded object is not UIImage")
+                    return
+                }
+                self?.log.info("image loaded: \(Int(image.size.width))x\(Int(image.size.height))")
+                DispatchQueue.main.async {
+                    self?.parent.onPick(image)
+                }
             }
         }
     }

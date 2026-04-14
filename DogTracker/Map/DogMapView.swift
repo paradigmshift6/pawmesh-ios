@@ -45,6 +45,7 @@ struct DogMapView: UIViewRepresentable {
     class Coordinator: NSObject, MLNMapViewDelegate {
         private var currentAnnotations: [String: MLNPointAnnotation] = [:]
         private var markerColors: [String: String] = [:]
+        private var markerPhotos: [String: UIImage] = [:]
         private var currentTrails: [UInt32: MLNPolyline] = [:]
         private var trailColors: [UInt32: String] = [:]
         private var tileSourceAdded = false
@@ -83,12 +84,28 @@ struct DogMapView: UIViewRepresentable {
                 nextIDs.insert(key)
                 markerColors[key] = marker.colorHex
 
+                // Cache photo image (decode once)
+                let hadPhoto = markerPhotos[key] != nil
+                if let data = marker.photoData, let img = UIImage(data: data) {
+                    markerPhotos[key] = img
+                } else {
+                    markerPhotos.removeValue(forKey: key)
+                }
+                let hasPhoto = markerPhotos[key] != nil
+                let photoChanged = hadPhoto != hasPhoto
+
                 let coord = CLLocationCoordinate2D(latitude: marker.latitude, longitude: marker.longitude)
 
                 if let existing = currentAnnotations[key] {
                     existing.coordinate = coord
                     existing.title = marker.name
                     existing.subtitle = marker.subtitle
+
+                    // Force annotation view refresh if photo was added/removed
+                    if photoChanged {
+                        mapView.removeAnnotation(existing)
+                        mapView.addAnnotation(existing)
+                    }
                 } else {
                     let ann = MLNPointAnnotation()
                     ann.coordinate = coord
@@ -103,6 +120,7 @@ struct DogMapView: UIViewRepresentable {
                 mapView.removeAnnotation(ann)
                 currentAnnotations.removeValue(forKey: key)
                 markerColors.removeValue(forKey: key)
+                markerPhotos.removeValue(forKey: key)
             }
         }
 
@@ -166,28 +184,42 @@ struct DogMapView: UIViewRepresentable {
         func mapView(_ mapView: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
             guard !(annotation is MLNUserLocation) else { return nil }
 
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: "dog")
-                ?? MLNAnnotationView(reuseIdentifier: "dog")
-            view.frame = CGRect(x: 0, y: 0, width: 36, height: 36)
+            let size: CGFloat = 40
+            let view = MLNAnnotationView(reuseIdentifier: nil) // no reuse, photos differ
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.subviews.forEach { $0.removeFromSuperview() }
 
             let color = annotationColor(annotation)
+            let photo = annotationPhoto(annotation)
 
             let circle = UIView(frame: view.bounds)
-            circle.backgroundColor = color
-            circle.layer.cornerRadius = 18
+            circle.layer.cornerRadius = size / 2
+            circle.clipsToBounds = true
             circle.layer.borderColor = UIColor.white.cgColor
-            circle.layer.borderWidth = 2
+            circle.layer.borderWidth = 2.5
 
-            let label = UILabel(frame: view.bounds)
-            label.text = String((annotation.title ?? "?")?.prefix(1) ?? "?")
-            label.textAlignment = .center
-            label.textColor = .white
-            label.font = .boldSystemFont(ofSize: 16)
+            if let photo {
+                // Dog photo as marker
+                let imageView = UIImageView(frame: circle.bounds)
+                imageView.image = photo
+                imageView.contentMode = .scaleAspectFill
+                imageView.clipsToBounds = true
+                circle.addSubview(imageView)
+                // Tinted border from tracker color
+                circle.layer.borderColor = color.cgColor
+            } else {
+                // Colored circle with initial
+                circle.backgroundColor = color
 
-            view.subviews.forEach { $0.removeFromSuperview() }
+                let label = UILabel(frame: circle.bounds)
+                label.text = String((annotation.title ?? "?")?.prefix(1) ?? "?")
+                label.textAlignment = .center
+                label.textColor = .white
+                label.font = .boldSystemFont(ofSize: 16)
+                circle.addSubview(label)
+            }
+
             view.addSubview(circle)
-            view.addSubview(label)
-
             return view
         }
 
@@ -252,13 +284,21 @@ struct DogMapView: UIViewRepresentable {
         }
 
         private func annotationColor(_ annotation: MLNAnnotation) -> UIColor {
-            // Find by matching annotation key in our marker colors map
             for (key, ann) in currentAnnotations {
                 if ann === annotation, let hex = markerColors[key] {
                     return UIColor(hex: hex) ?? .systemGreen
                 }
             }
             return .systemGreen
+        }
+
+        private func annotationPhoto(_ annotation: MLNAnnotation) -> UIImage? {
+            for (key, ann) in currentAnnotations {
+                if ann === annotation {
+                    return markerPhotos[key]
+                }
+            }
+            return nil
         }
     }
 }

@@ -9,6 +9,7 @@ struct DogTrackerApp: App {
     @State private var location = LocationProvider()
     @State private var units = UnitSettings()
     @AppStorage("onboardingComplete") private var onboardingComplete = false
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         do {
@@ -43,6 +44,11 @@ struct DogTrackerApp: App {
         .environment(mesh)
         .environment(location)
         .environment(units)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                radio.handleReturnToForeground()
+            }
+        }
     }
 }
 
