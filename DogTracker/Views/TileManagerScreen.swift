@@ -99,6 +99,7 @@ struct TileDownloadSheet: View {
     @State private var errorMessage: String?
     /// Bounding box derived from the visible map region.
     @State private var visibleBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
+    @FocusState private var nameFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -106,12 +107,20 @@ struct TileDownloadSheet: View {
                 mapSection
                 controlsSection
             }
+            // Keep the map at its full size when the keyboard appears — otherwise
+            // the visible-bounds callback fires with a smaller map and the region
+            // the user picked jumps around.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .navigationTitle("Download Region")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .disabled(isDownloading)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { nameFieldFocused = false }
                 }
             }
         }
@@ -155,6 +164,9 @@ struct TileDownloadSheet: View {
         VStack(spacing: 12) {
             TextField("Region name (e.g. Yellowstone)", text: $regionName)
                 .textFieldStyle(.roundedBorder)
+                .focused($nameFieldFocused)
+                .submitLabel(.done)
+                .onSubmit { nameFieldFocused = false }
 
             HStack {
                 Text("Zoom")

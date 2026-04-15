@@ -16,6 +16,10 @@ struct DogMapView: UIViewRepresentable {
     let markers: [DogMarker]
     var trails: [DogTrail] = []
     var centerOn: CLLocationCoordinate2D?
+    /// When this ID changes, the map re-fits the viewport to show the user
+    /// plus every marker. Pass a fresh UUID from the parent to trigger a
+    /// recenter (e.g. when the user taps a "fit all" button).
+    var fitToMarkersID: UUID?
     /// Optional path to an MBTiles file for offline topo tiles.
     var offlineTilePath: String?
 
@@ -23,9 +27,11 @@ struct DogMapView: UIViewRepresentable {
         let mapView = MLNMapView(frame: .zero)
         mapView.delegate = context.coordinator
 
-        // Show user location (blue dot)
+        // Show user location (blue dot). We disable follow mode so the user
+        // stays in control of the camera; the "recenter" button explicitly
+        // fits everything when the user wants it.
         mapView.showsUserLocation = true
-        mapView.userTrackingMode = .follow
+        mapView.userTrackingMode = .none
         mapView.setZoomLevel(13, animated: false)
 
         return mapView
@@ -38,6 +44,12 @@ struct DogMapView: UIViewRepresentable {
         if let center = centerOn {
             mapView.setCenter(center, zoomLevel: max(mapView.zoomLevel, 14), animated: true)
         }
+
+        context.coordinator.handleFitRequest(
+            on: mapView,
+            id: fitToMarkersID,
+            markers: markers
+        )
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -52,6 +64,8 @@ struct DogMapView: UIViewRepresentable {
         /// Path of the currently loaded mbtiles file, so we know if it changed.
         private var loadedMBTilesPath: String?
         private weak var mapViewRef: MLNMapView?
+        /// Last fit-to-bounds request honored. We only act when the ID changes.
+        private var lastFitID: UUID?
 
         override init() {
             super.init()
@@ -77,6 +91,45 @@ struct DogMapView: UIViewRepresentable {
             }
             loadedMBTilesPath = nil
             tileSourceAdded = false
+        }
+
+        /// Fit the viewport to include the user location + every marker.
+        /// No-op if the request ID matches the last one we honored, or if
+        /// we have nothing to show.
+        func handleFitRequest(on mapView: MLNMapView, id: UUID?, markers: [DogMarker]) {
+            guard let id, id != lastFitID else { return }
+
+            var coords = markers.map {
+                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+            }
+            if let userLoc = mapView.userLocation?.coordinate,
+               CLLocationCoordinate2DIsValid(userLoc),
+               !(userLoc.latitude == 0 && userLoc.longitude == 0) {
+                coords.append(userLoc)
+            }
+            guard !coords.isEmpty else { return }
+            lastFitID = id
+
+            if coords.count == 1 {
+                // One point — just center, keep current zoom (or jump to 14 if fully out)
+                mapView.setCenter(coords[0],
+                                  zoomLevel: max(mapView.zoomLevel, 13),
+                                  animated: true)
+                return
+            }
+
+            var minLat = coords[0].latitude, maxLat = coords[0].latitude
+            var minLon = coords[0].longitude, maxLon = coords[0].longitude
+            for c in coords.dropFirst() {
+                minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
+                minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
+            }
+            let sw = CLLocationCoordinate2D(latitude: minLat, longitude: minLon)
+            let ne = CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
+            let bounds = MLNCoordinateBounds(sw: sw, ne: ne)
+            // Generous padding so markers don't sit under the status bar or FAB.
+            let insets = UIEdgeInsets(top: 100, left: 60, bottom: 120, right: 60)
+            mapView.setVisibleCoordinateBounds(bounds, edgePadding: insets, animated: true)
         }
 
         func updateMarkers(on mapView: MLNMapView, markers: [DogMarker]) {

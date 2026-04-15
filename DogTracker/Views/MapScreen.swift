@@ -10,11 +10,21 @@ struct MapScreen: View {
     @Query(sort: \Fix.fixTime) private var allFixes: [Fix]
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
+    /// Bump this to ask DogMapView to fit the viewport to user+markers.
+    @State private var fitID: UUID?
+    /// Tracks whether we've already auto-fit once so we don't re-fit every
+    /// time a marker updates — only on first appearance.
+    @State private var hasAutoFit = false
 
     var body: some View {
         ZStack(alignment: .top) {
-            DogMapView(markers: dogMarkers, trails: dogTrails, centerOn: centerOn)
-                .ignoresSafeArea()
+            DogMapView(
+                markers: dogMarkers,
+                trails: dogTrails,
+                centerOn: centerOn,
+                fitToMarkersID: fitID
+            )
+            .ignoresSafeArea()
 
             statusBar
             if let t = selectedTracker {
@@ -24,8 +34,38 @@ struct MapScreen: View {
                 .transition(.move(edge: .bottom))
             }
         }
+        .overlay(alignment: .topTrailing) { recenterButton }
         .overlay(alignment: .bottomTrailing) { pingAllButton }
         .overlay(alignment: .bottom) { lowBatteryBanner }
+        .onChange(of: dogMarkers.count) { _, newCount in
+            // Auto-fit once, the first time we actually have a marker to show.
+            if !hasAutoFit && newCount > 0 {
+                hasAutoFit = true
+                fitID = UUID()
+            }
+        }
+        .onAppear {
+            // If markers are already there on first appear, fit immediately.
+            if !hasAutoFit && !dogMarkers.isEmpty {
+                hasAutoFit = true
+                fitID = UUID()
+            }
+        }
+    }
+
+    // MARK: - Recenter button
+
+    private var recenterButton: some View {
+        Button {
+            fitID = UUID()
+        } label: {
+            Image(systemName: "scope")
+                .font(.title3)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .padding(.top, 60)
+        .padding(.trailing, 12)
     }
 
     // MARK: - Trails
