@@ -33,8 +33,10 @@ struct ComplicationProvider: TimelineProvider {
         return ComplicationEntry(
             date: date,
             snapshot: fleet,
-            closest: pick?.0,
-            closestMeters: pick?.1
+            closest: pick?.tracker,
+            closestMeters: pick?.meters,
+            closestBearing: pick?.bearing,
+            arrowAngle: pick?.arrowAngle
         )
     }
 }
