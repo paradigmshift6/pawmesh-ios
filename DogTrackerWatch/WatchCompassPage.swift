@@ -9,6 +9,9 @@ import CoreLocation
 struct WatchCompassPage: View {
     @Environment(WatchSession.self) private var session
     @Environment(WatchHeadingProvider.self) private var heading
+    /// True when the watch is in Always-On Display mode (dim).
+    /// In this mode we skip animations and dim colors to preserve OLED.
+    @Environment(\.isLuminanceReduced) private var isDimmed
     let tracker: TrackerSnapshot
 
     /// Drives a 1Hz re-render so the fix-age label and color tier update
@@ -29,6 +32,26 @@ struct WatchCompassPage: View {
         }
         .padding(.horizontal, 8)
         .onReceive(tick) { now = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(voiceOverSummary)
+    }
+
+    /// VoiceOver reads the whole page as one phrase: "Maple, 20.5 miles,
+    /// bearing 47 degrees, fix 12 seconds ago." The per-element visuals
+    /// still render; we just give the screen reader a sensible narrative.
+    private var voiceOverSummary: String {
+        var parts: [String] = [tracker.name]
+        if let meters = distanceMeters {
+            parts.append(BearingMath.distanceString(meters, useMetric: session.snapshot.useMetric))
+        }
+        if let angle = arrowAngle {
+            // Normalize 0..360 for readability.
+            let normalized = Int(((angle.truncatingRemainder(dividingBy: 360)) + 360)
+                                 .truncatingRemainder(dividingBy: 360))
+            parts.append("bearing \(normalized) degrees")
+        }
+        parts.append(FixAge.describe(tracker.lastFix?.fixTime, now: now).text)
+        return parts.joined(separator: ", ")
     }
 
     /// Shown when the watch's compass is poorly calibrated — the arrow
@@ -124,8 +147,12 @@ struct WatchCompassPage: View {
                 .scaledToFit()
                 .frame(width: 60, height: 60)
                 .foregroundStyle(Color(hex: tracker.colorHex) ?? .green)
+                .opacity(isDimmed ? 0.5 : 1.0)
                 .rotationEffect(.degrees(angle))
-                .animation(.easeOut(duration: 0.3), value: angle)
+                // Skip the springy arrow animation in AOD — animations
+                // cost extra OLED draw and the user doesn't see them
+                // update smoothly anyway in dim mode.
+                .animation(isDimmed ? nil : .easeOut(duration: 0.3), value: angle)
         } else {
             Image(systemName: "location.slash")
                 .resizable()
@@ -207,5 +234,7 @@ struct WatchCompassPage: View {
         }
         .controlSize(.small)
         .disabled(session.snapshot.linkState == .disconnected)
+        .accessibilityLabel("Ping \(tracker.name)")
+        .accessibilityHint("Requests a fresh GPS position from this tracker.")
     }
 }

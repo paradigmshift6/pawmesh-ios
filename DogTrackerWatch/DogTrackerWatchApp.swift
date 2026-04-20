@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct DogTrackerWatchApp: App {
+    @WKApplicationDelegateAdaptor(WatchBackgroundRefreshHandler.self)
+    private var backgroundHandler
     @State private var session = WatchSession()
     @State private var heading = WatchHeadingProvider()
     /// Deep-link target from the complication tap: a specific tracker
