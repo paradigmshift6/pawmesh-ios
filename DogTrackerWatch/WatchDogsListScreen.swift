@@ -6,6 +6,8 @@ import CoreLocation
 /// that dog.
 struct WatchDogsListScreen: View {
     @Environment(WatchSession.self) private var session
+    /// Nav path passed from the root so deep-link pushes work.
+    @Binding var path: [UInt32]
 
     /// 1Hz tick so the fix-age "ago" labels stay live.
     @State private var now = Date()

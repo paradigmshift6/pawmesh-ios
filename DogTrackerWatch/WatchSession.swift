@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import WatchConnectivity
 import OSLog
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 /// watchOS side of the WatchConnectivity bridge.
 ///
@@ -133,6 +136,14 @@ final class WatchSession: NSObject {
             let decoded = try JSONDecoder.snapshot.decode(FleetSnapshot.self, from: data)
             snapshot = decoded
             log.info("snapshot applied — \(decoded.trackers.count) trackers, link=\(decoded.linkState.rawValue)")
+
+            // Mirror to the shared App Group so the watch complication
+            // extension can render off the same state, then kick
+            // WidgetKit to refresh right away.
+            SharedSnapshotStore.write(decoded)
+            #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadAllTimelines()
+            #endif
         } catch {
             log.error("snapshot decode failed: \(error.localizedDescription)")
         }

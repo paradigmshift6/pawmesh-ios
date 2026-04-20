@@ -68,12 +68,16 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: LV3P9K7AFP
+        CODE_SIGN_ENTITLEMENTS: DogTracker/DogTracker.entitlements
   DogTrackerWatch:
     type: application
     platform: watchOS
     sources:
       - path: DogTrackerWatch
       - path: Shared
+    dependencies:
+      - target: DogTrackerWatchComplication
+        embed: true
     info:
       path: DogTrackerWatch/Info.plist
       properties:
@@ -87,6 +91,9 @@ targets:
         NSLocationWhenInUseUsageDescription: >-
           PawMesh reads your watch's compass so the arrow points
           toward each dog as you turn your wrist.
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - pawmesh
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.levijohnson.DogTracker.watchkitapp
@@ -97,6 +104,32 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: LV3P9K7AFP
+        CODE_SIGN_ENTITLEMENTS: DogTrackerWatch/DogTrackerWatch.entitlements
+  DogTrackerWatchComplication:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: DogTrackerWatchComplication
+      - path: Shared
+    info:
+      path: DogTrackerWatchComplication/Info.plist
+      properties:
+        CFBundleDisplayName: PawMesh Complication
+        CFBundleShortVersionString: "1.0.1"
+        CFBundleVersion: "2"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.levijohnson.DogTracker.watchkitapp.complication
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "10.0"
+        SUPPORTED_PLATFORMS: "watchsimulator watchos"
+        SDKROOT: watchos
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: LV3P9K7AFP
+        CODE_SIGN_ENTITLEMENTS: DogTrackerWatchComplication/DogTrackerWatchComplication.entitlements
   DogTrackerTests:
     type: bundle.unit-test
     platform: iOS
@@ -114,6 +147,7 @@ schemes:
       targets:
         DogTracker: all
         DogTrackerWatch: all
+        DogTrackerWatchComplication: all
         DogTrackerTests: [test]
     run:
       config: Debug
@@ -131,6 +165,7 @@ schemes:
     build:
       targets:
         DogTrackerWatch: all
+        DogTrackerWatchComplication: all
     run:
       config: Debug
     profile:
