@@ -36,12 +36,20 @@ final class RadioController {
     /// Used by OnboardingManager while switching between companion and tracker
     /// so we don't bounce back to the companion during tracker scan.
     var suppressAutoReconnect: Bool = false
-    /// How many consecutive reconnect attempts have failed.
+    /// How many consecutive reconnect attempts have failed. Reset only on
+    /// a successful `.connected` transition (NOT on "found via scan" —
+    /// finding the peripheral doesn't guarantee the connect succeeds, and
+    /// resetting there meant we never escalated backoff on encryption
+    /// failures).
     private var reconnectAttempts = 0
     /// Whether the last failure was an encryption/connect error (stale peripheral).
     private var lastFailWasEncryption = false
     /// Max direct UUID reconnect attempts before falling back to scan.
     private static let maxDirectAttempts = 2
+    /// Upper bound on consecutive reconnect attempts before we stop trying
+    /// and surface the error. Picked so that a wedged BLE link gets roughly
+    /// 60 seconds of recovery before the user has to intervene.
+    private static let maxReconnectAttempts = 8
 
     private static let savedPeripheralKey = "lastConnectedPeripheralUUID"
 
@@ -238,6 +246,19 @@ final class RadioController {
 
         reconnectAttempts += 1
         let attempt = reconnectAttempts
+
+        // Hard ceiling. If we've retried this many times without success,
+        // BLE is genuinely wedged (almost always iOS↔Heltec bonding state
+        // drift) and hammering it more just wastes battery + log spam.
+        // The user needs to Forget the device in iOS Bluetooth settings
+        // and re-pair via the onboarding flow.
+        guard attempt <= Self.maxReconnectAttempts else {
+            print("[Radio] giving up after \(attempt - 1) reconnect attempts — " +
+                  "the BLE link is wedged. Try: Settings → Bluetooth → Forget " +
+                  "this device, then re-pair via PawMesh onboarding.")
+            return
+        }
+
         let needsScan = lastFailWasEncryption || attempt > Self.maxDirectAttempts
 
         reconnectTask?.cancel()
@@ -247,15 +268,22 @@ final class RadioController {
             if !needsScan {
                 // Direct UUID reconnect with backoff: 3s, 6s
                 let delay = attempt <= 1 ? 3 : 6
-                print("[Radio] reconnect attempt \(attempt)/\(Self.maxDirectAttempts) in \(delay)s (direct UUID)")
+                print("[Radio] reconnect attempt \(attempt)/\(Self.maxReconnectAttempts) in \(delay)s (direct UUID)")
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled else { return }
                 await self.radio.connectByUUID(uuid)
             } else {
                 // Scan-based reconnect — gets a fresh CBPeripheral reference
                 // which fixes stale encryption state.
-                print("[Radio] scan-based reconnect (attempt \(attempt), encryption fail: \(self.lastFailWasEncryption))")
-                try? await Task.sleep(for: .seconds(2))
+                //
+                // Exponential backoff for scan retries. Short delays don't
+                // give iOS's BLE stack and the Heltec firmware enough time
+                // to clean up after an encryption failure, so we end up
+                // failing encryption on the next attempt too. Cap at 30s.
+                let scanBackoff = min(30, 2 << min(attempt, 4))  // 4, 8, 16, 32→30, 30, 30…
+                print("[Radio] scan-based reconnect (attempt \(attempt)/\(Self.maxReconnectAttempts), " +
+                      "backoff \(scanBackoff)s, encryption fail: \(self.lastFailWasEncryption))")
+                try? await Task.sleep(for: .seconds(scanBackoff))
                 guard !Task.isCancelled else { return }
 
                 self.lastFailWasEncryption = false
@@ -269,7 +297,12 @@ final class RadioController {
                     if let found = self.discovered.first(where: { $0.id == uuid }) {
                         print("[Radio] found \(found.name) via scan, reconnecting")
                         await self.radio.stopScan()
-                        self.reconnectAttempts = 0
+                        // NOTE: do NOT reset reconnectAttempts here. Finding
+                        // the peripheral doesn't mean we'll successfully
+                        // connect. Reset only fires on an actual .connected
+                        // event in handle(_:). Otherwise an encryption
+                        // failure after a successful scan restarts the
+                        // backoff at attempt 1, and we loop fast forever.
                         self.connect(uuid)
                         return
                     }

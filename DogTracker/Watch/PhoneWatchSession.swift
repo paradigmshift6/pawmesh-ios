@@ -225,9 +225,11 @@ extension PhoneWatchSession: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        // Reachability flaps constantly as the watch goes in/out of
+        // foreground, so only record the flag — no log line, otherwise
+        // the console fills up with noise during normal use.
         Task { @MainActor in
             self.isReachable = session.isReachable
-            self.log.info("reachability changed → \(session.isReachable)")
         }
     }
 
