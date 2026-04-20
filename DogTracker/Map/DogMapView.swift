@@ -193,25 +193,27 @@ struct DogMapView: UIViewRepresentable {
                     CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
                 }
 
-                // Remove old polyline if coordinate count changed
+                // Diagnostic: log span of the trail so we can tell whether
+                // a "missing" trail is actually rendering but sub-pixel
+                // (dog hasn't moved enough vs. an actual rendering bug).
+                let lats = coords.map(\.latitude)
+                let lons = coords.map(\.longitude)
+                let latSpan = (lats.max() ?? 0) - (lats.min() ?? 0)
+                let lonSpan = (lons.max() ?? 0) - (lons.min() ?? 0)
+                let approxMeters = max(latSpan, lonSpan) * 111_000  // crude: 1° lat ≈ 111km
+                print("[Trail] node=\(String(format: "%08x", trail.nodeNum)) " +
+                      "points=\(coords.count) span≈\(Int(approxMeters))m")
+
+                // Always replace the existing polyline. MLNPolyline doesn't
+                // let us mutate coordinates in place, and the previous
+                // pointCount-based branch was dead code (both arms did the
+                // same replace).
                 if let existing = currentTrails[trail.nodeNum] {
-                    if existing.pointCount != UInt(coords.count) {
-                        mapView.removeAnnotation(existing)
-                        let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
-                        mapView.addAnnotation(polyline)
-                        currentTrails[trail.nodeNum] = polyline
-                    } else {
-                        // Update coordinates in place
-                        mapView.removeAnnotation(existing)
-                        let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
-                        mapView.addAnnotation(polyline)
-                        currentTrails[trail.nodeNum] = polyline
-                    }
-                } else {
-                    let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
-                    mapView.addAnnotation(polyline)
-                    currentTrails[trail.nodeNum] = polyline
+                    mapView.removeAnnotation(existing)
                 }
+                let polyline = MLNPolyline(coordinates: &coords, count: UInt(coords.count))
+                mapView.addAnnotation(polyline)
+                currentTrails[trail.nodeNum] = polyline
             }
 
             // Remove trails for trackers no longer present
@@ -227,15 +229,25 @@ struct DogMapView: UIViewRepresentable {
                 // Find matching trail color
                 for (nodeNum, trail) in currentTrails where trail === polyline {
                     if let hex = trailColors[nodeNum] {
-                        return UIColor(hex: hex)?.withAlphaComponent(0.7) ?? .systemBlue
+                        return UIColor(hex: hex) ?? .systemRed
                     }
                 }
             }
-            return .systemBlue
+            // Fallback: bright red so missing-color cases are visually
+            // obvious instead of silently blending into water features.
+            return .systemRed
+        }
+
+        func mapView(_ mapView: MLNMapView, alphaForShapeAnnotation annotation: MLNShape) -> CGFloat {
+            // Slight transparency so the trail doesn't completely hide the
+            // basemap underneath but is still solidly visible.
+            0.9
         }
 
         func mapView(_ mapView: MLNMapView, lineWidthForPolylineAnnotation annotation: MLNPolyline) -> CGFloat {
-            3.0
+            // Wider line so trails are visible even when the dog hasn't
+            // moved much. 5pt is roughly the same width as a basemap road.
+            5.0
         }
 
         func mapView(_ mapView: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
