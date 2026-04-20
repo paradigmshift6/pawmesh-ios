@@ -140,7 +140,7 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: "1.0.1")
+            LabeledContent("Version", value: "1.1.0")
             LabeledContent("Map data", value: "USGS US Topo (public domain)")
             LabeledContent("Protocol", value: "Meshtastic® v2.7.21")
             LabeledContent("License", value: "GPL-3.0")
