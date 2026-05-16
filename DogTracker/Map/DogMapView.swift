@@ -18,6 +18,7 @@ struct DogMapView: UIViewRepresentable {
 
     let markers: [DogMarker]
     var trails: [DogTrail] = []
+    var fences: [FenceOverlay] = []
     var centerOn: CLLocationCoordinate2D?
     /// When this ID changes, the map re-fits the viewport to show the user
     /// plus every marker. Pass a fresh UUID from the parent to trigger a
@@ -25,6 +26,9 @@ struct DogMapView: UIViewRepresentable {
     var fitToMarkersID: UUID?
     /// Optional path to an MBTiles file for offline topo tiles.
     var offlineTilePath: String?
+    /// If set, single-taps on the map invoke this callback with the tapped
+    /// coordinate (used by the fence editor to place the center).
+    var onMapTap: ((CLLocationCoordinate2D) -> Void)?
 
     func makeUIView(context: Context) -> MLNMapView {
         let mapView = MLNMapView(frame: .zero)
@@ -37,12 +41,25 @@ struct DogMapView: UIViewRepresentable {
         mapView.userTrackingMode = .none
         mapView.setZoomLevel(13, animated: false)
 
+        // Single-tap gesture for editor mode. Always installed; the
+        // coordinator decides whether to forward based on `onMapTap`.
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleMapTap(_:))
+        )
+        // Don't let our tap recogniser swallow taps that belong to the
+        // built-in callout / annotation handling.
+        tap.cancelsTouchesInView = false
+        mapView.addGestureRecognizer(tap)
+
         return mapView
     }
 
     func updateUIView(_ mapView: MLNMapView, context: Context) {
+        context.coordinator.onMapTap = onMapTap
         context.coordinator.updateMarkers(on: mapView, markers: markers)
         context.coordinator.updateTrails(on: mapView, trails: trails)
+        context.coordinator.updateFences(on: mapView, fences: fences)
 
         if let center = centerOn {
             mapView.setCenter(center, zoomLevel: max(mapView.zoomLevel, 14), animated: true)
@@ -58,6 +75,7 @@ struct DogMapView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     @MainActor class Coordinator: NSObject, @preconcurrency MLNMapViewDelegate {
+        var onMapTap: ((CLLocationCoordinate2D) -> Void)?
         private var currentAnnotations: [String: MLNPointAnnotation] = [:]
         private var markerColors: [String: String] = [:]
         private var markerPhotos: [String: UIImage] = [:]
@@ -68,6 +86,9 @@ struct DogMapView: UIViewRepresentable {
         // own color expression.
         private var trailSources: [UInt32: MLNShapeSource] = [:]
         private var trailLayers: [UInt32: MLNLineStyleLayer] = [:]
+        private var fenceSources: [UUID: MLNShapeSource] = [:]
+        private var fenceFillLayers: [UUID: MLNFillStyleLayer] = [:]
+        private var fenceLineLayers: [UUID: MLNLineStyleLayer] = [:]
         private var tileSourceAdded = false
         /// Path of the currently loaded mbtiles file, so we know if it changed.
         private var loadedMBTilesPath: String?
@@ -248,6 +269,74 @@ struct DogMapView: UIViewRepresentable {
             }
         }
 
+        func updateFences(on mapView: MLNMapView, fences: [FenceOverlay]) {
+            guard let style = mapView.style else { return }
+            var nextIDs = Set<UUID>()
+
+            for fence in fences {
+                nextIDs.insert(fence.id)
+
+                var coords = CircleGeometry.polygon(
+                    center: CLLocationCoordinate2D(latitude: fence.centerLatitude,
+                                                   longitude: fence.centerLongitude),
+                    radiusMeters: fence.radiusMeters
+                )
+                let polygon = MLNPolygonFeature(coordinates: &coords, count: UInt(coords.count))
+                let color = UIColor(hex: fence.colorHex) ?? .systemRed
+
+                if let source = fenceSources[fence.id] {
+                    source.shape = polygon
+                    if let fill = fenceFillLayers[fence.id] {
+                        fill.fillColor = NSExpression(forConstantValue: color.withAlphaComponent(0.15))
+                    }
+                    if let line = fenceLineLayers[fence.id] {
+                        line.lineColor = NSExpression(forConstantValue: color)
+                    }
+                } else {
+                    let sourceID = "fence-src-\(fence.id.uuidString)"
+                    let fillID = "fence-fill-\(fence.id.uuidString)"
+                    let lineID = "fence-line-\(fence.id.uuidString)"
+                    let source = MLNShapeSource(identifier: sourceID, shape: polygon, options: nil)
+                    style.addSource(source)
+                    fenceSources[fence.id] = source
+
+                    let fill = MLNFillStyleLayer(identifier: fillID, source: source)
+                    fill.fillColor = NSExpression(forConstantValue: color.withAlphaComponent(0.15))
+                    fill.fillOutlineColor = NSExpression(forConstantValue: color)
+                    style.addLayer(fill)
+                    fenceFillLayers[fence.id] = fill
+
+                    let line = MLNLineStyleLayer(identifier: lineID, source: source)
+                    line.lineColor = NSExpression(forConstantValue: color)
+                    line.lineWidth = NSExpression(forConstantValue: 2.5)
+                    line.lineDashPattern = NSExpression(forConstantValue: [4, 2])
+                    style.addLayer(line)
+                    fenceLineLayers[fence.id] = line
+                }
+            }
+
+            for (id, layer) in fenceFillLayers where !nextIDs.contains(id) {
+                style.removeLayer(layer)
+                fenceFillLayers.removeValue(forKey: id)
+            }
+            for (id, layer) in fenceLineLayers where !nextIDs.contains(id) {
+                style.removeLayer(layer)
+                fenceLineLayers.removeValue(forKey: id)
+            }
+            for (id, source) in fenceSources where !nextIDs.contains(id) {
+                style.removeSource(source)
+                fenceSources.removeValue(forKey: id)
+            }
+        }
+
+        @objc func handleMapTap(_ gesture: UITapGestureRecognizer) {
+            guard let onMapTap, let mapView = gesture.view as? MLNMapView,
+                  gesture.state == .ended else { return }
+            let point = gesture.location(in: mapView)
+            let coord = mapView.convert(point, toCoordinateFrom: mapView)
+            onMapTap(coord)
+        }
+
         // Trail polylines are rendered via MLNShapeSource + MLNLineStyleLayer
         // (see updateTrails). Colors / widths are set on the style layer
         // directly; no shape-annotation delegate methods are needed.
@@ -398,6 +487,15 @@ struct DogMarker: Equatable {
     let longitude: Double
     let subtitle: String
     let photoData: Data?
+}
+
+/// Drawable representation of a geofence on the map.
+struct FenceOverlay: Equatable, Identifiable {
+    let id: UUID
+    let centerLatitude: Double
+    let centerLongitude: Double
+    let radiusMeters: Double
+    let colorHex: String
 }
 
 /// Trail data for drawing movement history polylines.

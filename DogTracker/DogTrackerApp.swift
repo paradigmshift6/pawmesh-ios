@@ -20,7 +20,8 @@ struct DogTrackerApp: App {
 
         do {
             let mc = try ModelContainer(
-                for: Tracker.self, Fix.self, TileRegion.self
+                for: Tracker.self, Fix.self, TileRegion.self,
+                Geofence.self, GeofenceEvent.self
             )
             self.modelContainer = mc
 
@@ -37,6 +38,15 @@ struct DogTrackerApp: App {
                 mesh: m, radio: r, location: loc, units: u, modelContainer: mc
             ))
 
+            // Start the radio + mesh consumers immediately so an iOS
+            // background launch (e.g. CoreBluetooth state restoration that
+            // delivers a position while the UI hasn't been created yet) is
+            // still observed by the geofence monitor. `.start()` is
+            // idempotent — onAppear's call below is a no-op the second time.
+            NotificationAuthorization.shared.install()
+            r.start()
+            m.start()
+
             if isDemo {
                 DemoSeeder.seedIfNeeded(modelContainer: mc)
             }
@@ -50,8 +60,6 @@ struct DogTrackerApp: App {
             if demoMode || onboardingComplete {
                 ContentView()
                     .onAppear {
-                        radio.start()
-                        mesh.start()
                         phoneWatch.start()
                         if demoMode {
                             // In demo mode, auto-connect to the fake radio

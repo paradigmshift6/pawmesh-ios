@@ -8,6 +8,7 @@ struct MapScreen: View {
     @Environment(UnitSettings.self) private var units
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @Query(sort: \Fix.fixTime) private var allFixes: [Fix]
+    @Query(filter: #Predicate<Geofence> { $0.isEnabled }) private var fences: [Geofence]
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
     /// Bump this to ask DogMapView to fit the viewport to user+markers.
@@ -21,6 +22,7 @@ struct MapScreen: View {
             DogMapView(
                 markers: dogMarkers,
                 trails: dogTrails,
+                fences: fenceOverlays,
                 centerOn: centerOn,
                 fitToMarkersID: fitID
             )
@@ -50,7 +52,20 @@ struct MapScreen: View {
                 hasAutoFit = true
                 fitID = UUID()
             }
+            consumeDeepLink()
         }
+        .onChange(of: NotificationAuthorization.shared.pendingDeepLink) { _, _ in
+            consumeDeepLink()
+        }
+    }
+
+    private func consumeDeepLink() {
+        guard let link = NotificationAuthorization.shared.pendingDeepLink else { return }
+        centerOn = CLLocationCoordinate2D(latitude: link.latitude, longitude: link.longitude)
+        if let match = trackers.first(where: { $0.nodeNum == link.nodeNum }) {
+            selectedTracker = match
+        }
+        NotificationAuthorization.shared.pendingDeepLink = nil
     }
 
     // MARK: - Recenter button
@@ -84,6 +99,20 @@ struct MapScreen: View {
             guard fixes.count >= 2 else { return nil }
             let coords = fixes.map { (lat: $0.latitude, lon: $0.longitude) }
             return DogTrail(nodeNum: tracker.nodeNum, colorHex: tracker.colorHex, coordinates: coords)
+        }
+    }
+
+    // MARK: - Fences
+
+    private var fenceOverlays: [FenceOverlay] {
+        fences.map {
+            FenceOverlay(
+                id: $0.id,
+                centerLatitude: $0.centerLatitude,
+                centerLongitude: $0.centerLongitude,
+                radiusMeters: $0.radiusMeters,
+                colorHex: $0.colorHex
+            )
         }
     }
 

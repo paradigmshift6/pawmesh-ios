@@ -19,6 +19,7 @@ struct SettingsScreen: View {
             Form {
                 radioSection
                 unitsSection
+                fencesSection
                 deviceSetupSection
                 factoryResetSection
                 meshSection
@@ -63,6 +64,18 @@ struct SettingsScreen: View {
             } label: {
                 LabeledContent("Mesh radio", value: shortStatus)
             }
+        }
+    }
+
+    private var fencesSection: some View {
+        Section {
+            NavigationLink {
+                FencesListScreen()
+            } label: {
+                Label("Geofences", systemImage: "mappin.and.ellipse")
+            }
+        } footer: {
+            Text("Get a push notification when a dog leaves a defined area. Requires the app to be running or in the background to deliver alerts.")
         }
     }
 
@@ -140,7 +153,7 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: "1.1.0")
+            LabeledContent("Version", value: "1.2.0")
             LabeledContent("Map data", value: "USGS US Topo (public domain)")
             LabeledContent("Protocol", value: "Meshtastic® v2.7.21")
             LabeledContent("License", value: "GPL-3.0")

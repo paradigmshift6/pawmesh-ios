@@ -25,10 +25,12 @@ final class MeshService {
     private let modelContainer: ModelContainer
     private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "Mesh")
     private var consumer: Task<Void, Never>?
+    let geofence: GeofenceMonitor
 
     init(radio: RadioController, modelContainer: ModelContainer) {
         self.radio = radio
         self.modelContainer = modelContainer
+        self.geofence = GeofenceMonitor(modelContainer: modelContainer)
     }
 
 
@@ -337,6 +339,16 @@ final class MeshService {
         } catch {
             log.error("failed to save fix: \(error.localizedDescription)")
         }
+
+        // Geofence check runs after the fix is persisted so the event row
+        // can reference a stable Fix if we ever want to link them.
+        geofence.evaluate(
+            nodeNum: nodeNum,
+            latitude: lat,
+            longitude: lon,
+            fixTime: fixTime,
+            trackerName: tracker.name
+        )
 
         // Prune old fixes: cap at 2000 per tracker
         pruneOldFixes(trackerNodeNum: nodeNum, context: context)
