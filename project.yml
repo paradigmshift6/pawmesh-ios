@@ -161,6 +161,11 @@ schemes:
       config: Debug
     archive:
       config: Release
+      postActions:
+        - name: Install MapLibre dSYM
+          script: |
+            "${SRCROOT}/tools/install_maplibre_dsym.sh" "${ARCHIVE_PATH}" >> "${SRCROOT}/build/maplibre-dsym.log" 2>&1
+          settingsTarget: DogTracker
   DogTrackerWatch:
     build:
       targets:
