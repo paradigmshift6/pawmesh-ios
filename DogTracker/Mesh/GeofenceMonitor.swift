@@ -60,8 +60,11 @@ final class GeofenceMonitor {
             // Hysteresis: a dog has to come back in by `hysteresis` meters
             // beyond the radius before we consider them re-entered. Avoids
             // flapping notifications when GPS noise sits the dog right on
-            // the boundary.
-            let hysteresis = max(10.0, fence.radiusMeters * 0.05)
+            // the boundary. Scales with radius (10%) but capped so the
+            // deadband never dominates a small fence or grows unbounded
+            // on a huge one. Floor of 3m matches roughly the best-case
+            // GPS noise we'll see from a clear-sky tracker fix.
+            let hysteresis = max(3.0, min(fence.radiusMeters * 0.1, 50.0))
             let key = StateKey(fenceID: fence.id, nodeNum: nodeNum)
             let wasInside = states[key]
 

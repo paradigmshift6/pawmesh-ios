@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>PawMesh connects to your LoRa mesh radio over Bluetooth to receive GPS positions from your dog trackers.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

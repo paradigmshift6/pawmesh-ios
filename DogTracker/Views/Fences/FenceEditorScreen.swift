@@ -121,7 +121,7 @@ struct FenceEditorScreen: View {
                 VStack(alignment: .leading) {
                     Text(radiusLabel)
                         .font(.subheadline.monospacedDigit())
-                    Slider(value: $radiusMeters, in: 50...2000, step: 10)
+                    Slider(value: $radiusMeters, in: 15...2000, step: 5)
                 }
             }
 
