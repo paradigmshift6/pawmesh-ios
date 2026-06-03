@@ -171,7 +171,7 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: "1.3.0")
+            LabeledContent("Version", value: "1.3.1")
             LabeledContent("Protocol", value: "Meshtastic® v2.7.21")
             LabeledContent("License", value: "GPL-3.0")
         } header: {
