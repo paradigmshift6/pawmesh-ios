@@ -11,7 +11,8 @@ extension Notification.Name {
 }
 
 /// SwiftUI wrapper around MapLibre's `MLNMapView`. Shows:
-///   - USGS topo tiles: offline MBTiles when available, online fallback otherwise.
+///   - Topo tiles: the offline MBTiles file at `offlineTilePath` when set,
+///     otherwise the online `onlineSource` (USGS / basemap.at / BKG).
 ///   - The user's current location (built-in blue dot).
 ///   - Dog tracker markers as colored circles with photo or initial.
 struct DogMapView: UIViewRepresentable {
@@ -24,7 +25,11 @@ struct DogMapView: UIViewRepresentable {
     /// plus every marker. Pass a fresh UUID from the parent to trigger a
     /// recenter (e.g. when the user taps a "fit all" button).
     var fitToMarkersID: UUID?
-    /// Optional path to an MBTiles file for offline topo tiles.
+    /// Online tile source to render when no offline file is supplied. Resolved
+    /// by the parent from the user's location + the Settings override.
+    var onlineSource: MapSource = .bkgTopPlus
+    /// Optional path to an MBTiles file for offline topo tiles. When set it
+    /// takes priority over `onlineSource`.
     var offlineTilePath: String?
     /// If set, single-taps on the map invoke this callback with the tapped
     /// coordinate (used by the fence editor to place the center).
@@ -57,6 +62,9 @@ struct DogMapView: UIViewRepresentable {
 
     func updateUIView(_ mapView: MLNMapView, context: Context) {
         context.coordinator.onMapTap = onMapTap
+        context.coordinator.applyTileSource(
+            on: mapView, onlineSource: onlineSource, offlineTilePath: offlineTilePath
+        )
         context.coordinator.updateMarkers(on: mapView, markers: markers)
         context.coordinator.updateTrails(on: mapView, trails: trails)
         context.coordinator.updateFences(on: mapView, fences: fences)
@@ -89,9 +97,15 @@ struct DogMapView: UIViewRepresentable {
         private var fenceSources: [UUID: MLNShapeSource] = [:]
         private var fenceFillLayers: [UUID: MLNFillStyleLayer] = [:]
         private var fenceLineLayers: [UUID: MLNLineStyleLayer] = [:]
-        private var tileSourceAdded = false
-        /// Path of the currently loaded mbtiles file, so we know if it changed.
-        private var loadedMBTilesPath: String?
+        static let tileSourceID = "topo-source"
+        static let tileLayerID = "topo-layer"
+        /// Identifies the currently-rendered tiles: an offline file path or
+        /// "online:<source id>". We only rebuild the raster layer when it changes.
+        private var appliedTileKey: String?
+        /// Latest source/path requested by the parent, re-applied once the
+        /// style finishes loading (updateUIView can run before that).
+        private var desiredOnlineSource: MapSource = .bkgTopPlus
+        private var desiredOfflinePath: String?
         private weak var mapViewRef: MLNMapView?
         /// Last fit-to-bounds request honored. We only act when the ID changes.
         private var lastFitID: UUID?
@@ -109,17 +123,24 @@ struct DogMapView: UIViewRepresentable {
         }
 
         /// Remove the tile source before the mbtiles file is deleted to prevent
-        /// MapLibre's SQLite handle from crashing on a deleted vnode.
+        /// MapLibre's SQLite handle from crashing on a deleted vnode. We also
+        /// clear `desiredOfflinePath` so any immediate re-apply falls back to
+        /// the online source rather than the file that's about to vanish; the
+        /// parent's next `updateUIView` supplies the correct replacement.
         @objc private func handleWillDeleteTiles() {
+            desiredOfflinePath = nil
+            appliedTileKey = nil
             guard let style = mapViewRef?.style else { return }
-            if let layer = style.layer(withIdentifier: "usgs-topo-layer") {
+            removeTileLayer(from: style)
+        }
+
+        private func removeTileLayer(from style: MLNStyle) {
+            if let layer = style.layer(withIdentifier: Self.tileLayerID) {
                 style.removeLayer(layer)
             }
-            if let source = style.source(withIdentifier: "usgs-topo") {
+            if let source = style.source(withIdentifier: Self.tileSourceID) {
                 style.removeSource(source)
             }
-            loadedMBTilesPath = nil
-            tileSourceAdded = false
         }
 
         /// Fit the viewport to include the user location + every marker.
@@ -402,60 +423,61 @@ struct DogMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
             mapViewRef = mapView
-            guard !tileSourceAdded else { return }
-            tileSourceAdded = true
-            addTileSource(to: style)
-
-            // Re-add tile source after a deletion
-            NotificationCenter.default.addObserver(
-                forName: .didDeleteTileRegion, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, !self.tileSourceAdded else { return }
-                    self.tileSourceAdded = true
-                    self.addTileSource(to: style)
-                }
-            }
+            // The style is now ready — (re)apply whatever the parent last asked
+            // for. `appliedTileKey` is nil here on first load, so this always
+            // adds the layer.
+            applyResolvedTileSource(to: style)
         }
 
-        private func addTileSource(to style: MLNStyle) {
-            // Try offline MBTiles first
-            guard let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("TileRegions") else {
-                addOnlineSource(to: style)
-                return
-            }
-            if let files = try? FileManager.default.contentsOfDirectory(at: docsDir, includingPropertiesForKeys: nil),
-               let first = files.first(where: { $0.pathExtension == "mbtiles" }) {
-                let mbtURL = first.absoluteString
-                let source = MLNRasterTileSource(
-                    identifier: "usgs-topo",
-                    tileURLTemplates: ["mbtiles://\(mbtURL)"],
+        /// Render `offlineTilePath` if set, otherwise `onlineSource`. Rebuilds
+        /// the raster source/layer only when the effective tiles change. Safe to
+        /// call before the style loads — it stores the request and no-ops until
+        /// `didFinishLoading` applies it.
+        func applyTileSource(on mapView: MLNMapView, onlineSource: MapSource, offlineTilePath: String?) {
+            mapViewRef = mapView
+            desiredOnlineSource = onlineSource
+            desiredOfflinePath = offlineTilePath
+            guard let style = mapView.style else { return }
+            applyResolvedTileSource(to: style)
+        }
+
+        private func applyResolvedTileSource(to style: MLNStyle) {
+            let key = desiredOfflinePath.map { "offline:\($0)" } ?? "online:\(desiredOnlineSource.id)"
+            guard key != appliedTileKey else { return }
+            appliedTileKey = key
+
+            removeTileLayer(from: style)
+
+            let source: MLNRasterTileSource
+            if let path = desiredOfflinePath {
+                source = MLNRasterTileSource(
+                    identifier: Self.tileSourceID,
+                    tileURLTemplates: ["mbtiles://\(path)"],
                     options: [.tileSize: 256]
                 )
-                style.addSource(source)
-                style.addLayer(MLNRasterStyleLayer(identifier: "usgs-topo-layer", source: source))
-                return
+            } else {
+                source = MLNRasterTileSource(
+                    identifier: Self.tileSourceID,
+                    tileURLTemplates: [desiredOnlineSource.tileURLTemplate],
+                    options: [
+                        .tileSize: 256,
+                        .minimumZoomLevel: desiredOnlineSource.minZoom,
+                        .maximumZoomLevel: desiredOnlineSource.maxZoom,
+                    ]
+                )
             }
-
-            // Online fallback
-            addOnlineSource(to: style)
-        }
-
-        private func addOnlineSource(to style: MLNStyle) {
-            let source = MLNRasterTileSource(
-                identifier: "usgs-topo",
-                tileURLTemplates: [
-                    "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"
-                ],
-                options: [
-                    .tileSize: 256,
-                    .minimumZoomLevel: 1,
-                    .maximumZoomLevel: 16,
-                ]
-            )
             style.addSource(source)
-            style.addLayer(MLNRasterStyleLayer(identifier: "usgs-topo-layer", source: source))
+
+            // Place the basemap above any background layer but beneath the
+            // first content layer (trails / fences) so those stay visible
+            // across source swaps. With no content layers yet (first load),
+            // add on top — matching the original behavior that's known to render.
+            let layer = MLNRasterStyleLayer(identifier: Self.tileLayerID, source: source)
+            if let firstContent = style.layers.first(where: { !($0 is MLNBackgroundStyleLayer) }) {
+                style.insertLayer(layer, below: firstContent)
+            } else {
+                style.addLayer(layer)
+            }
         }
 
         private func annotationColor(_ annotation: MLNAnnotation) -> UIColor {
@@ -507,6 +529,31 @@ struct DogTrail: Equatable {
     static func == (lhs: DogTrail, rhs: DogTrail) -> Bool {
         lhs.nodeNum == rhs.nodeNum && lhs.colorHex == rhs.colorHex
             && lhs.coordinates.count == rhs.coordinates.count
+    }
+}
+
+// MARK: - Attribution
+
+/// Small tappable attribution chip shown over the map. Crediting the tile
+/// provider is required by the basemap.at (CC-BY 4.0) and BKG (dl-de/by-2-0)
+/// licenses; we credit USGS too.
+struct MapAttributionLabel: View {
+    let source: MapSource
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button {
+            if let url = source.attributionURL { openURL(url) }
+        } label: {
+            Text(source.attribution)
+                .font(.caption2)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("Map data: \(source.attribution)")
     }
 }
 

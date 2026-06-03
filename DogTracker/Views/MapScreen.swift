@@ -6,9 +6,13 @@ struct MapScreen: View {
     @Environment(RadioController.self) private var radio
     @Environment(MeshService.self) private var mesh
     @Environment(UnitSettings.self) private var units
+    @Environment(LocationProvider.self) private var location
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
     @Query(sort: \Fix.fixTime) private var allFixes: [Fix]
     @Query(filter: #Predicate<Geofence> { $0.isEnabled }) private var fences: [Geofence]
+    @Query(sort: \TileRegion.downloadedAt, order: .reverse) private var regions: [TileRegion]
+    /// Persisted Settings override: "auto" or a specific MapSource.id.
+    @AppStorage("mapSourceMode") private var mapSourceMode = MapSource.autoModeID
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
     /// Bump this to ask DogMapView to fit the viewport to user+markers.
@@ -24,7 +28,9 @@ struct MapScreen: View {
                 trails: dogTrails,
                 fences: fenceOverlays,
                 centerOn: centerOn,
-                fitToMarkersID: fitID
+                fitToMarkersID: fitID,
+                onlineSource: resolvedOnlineSource,
+                offlineTilePath: activeOfflineRegion.flatMap(offlinePath)
             )
             .ignoresSafeArea()
 
@@ -39,6 +45,11 @@ struct MapScreen: View {
         .overlay(alignment: .topTrailing) { recenterButton }
         .overlay(alignment: .bottomTrailing) { pingAllButton }
         .overlay(alignment: .bottom) { lowBatteryBanner }
+        .overlay(alignment: .bottomLeading) {
+            MapAttributionLabel(source: attributionSource)
+                .padding(.leading, 8)
+                .padding(.bottom, 8)
+        }
         .onChange(of: dogMarkers.count) { _, newCount in
             // Auto-fit once, the first time we actually have a marker to show.
             if !hasAutoFit && newCount > 0 {
@@ -114,6 +125,51 @@ struct MapScreen: View {
                 colorHex: $0.colorHex
             )
         }
+    }
+
+    // MARK: - Tile source
+
+    /// Best coordinate to choose a tile source / matching offline region from:
+    /// the user's GPS, else the centroid of the dogs on the map.
+    private var representativeCoordinate: CLLocationCoordinate2D? {
+        if let loc = location.userLocation { return loc.coordinate }
+        let markers = dogMarkers
+        guard !markers.isEmpty else { return nil }
+        let lat = markers.map(\.latitude).reduce(0, +) / Double(markers.count)
+        let lon = markers.map(\.longitude).reduce(0, +) / Double(markers.count)
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// Online source to use when no offline tiles cover the view.
+    private var resolvedOnlineSource: MapSource {
+        MapSource.resolve(mode: mapSourceMode, coordinate: representativeCoordinate)
+    }
+
+    /// Downloaded region to render, if any: the one covering our location, or —
+    /// when location is still unknown — the most recently downloaded region.
+    private var activeOfflineRegion: TileRegion? {
+        guard !regions.isEmpty else { return nil }
+        guard let c = representativeCoordinate else { return regions.first }
+        return regions.first { region in
+            c.latitude >= region.minLatitude && c.latitude <= region.maxLatitude &&
+            c.longitude >= region.minLongitude && c.longitude <= region.maxLongitude
+        }
+    }
+
+    /// Attribution to display: the offline region's provider when one is shown,
+    /// otherwise the resolved online provider.
+    private var attributionSource: MapSource {
+        activeOfflineRegion?.source ?? resolvedOnlineSource
+    }
+
+    /// Absolute `file://` URL string of a region's mbtiles file (DogMapView
+    /// wraps it as `mbtiles://`). Nil if the file is missing.
+    private func offlinePath(for region: TileRegion) -> String? {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("TileRegions") else { return nil }
+        let url = dir.appendingPathComponent(region.filename)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url.absoluteString
     }
 
     // MARK: - Markers

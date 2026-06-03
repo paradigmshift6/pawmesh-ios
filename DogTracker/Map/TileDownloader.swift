@@ -1,20 +1,18 @@
 import Foundation
 import OSLog
 
-/// Downloads USGS US Topo raster tiles for a bounding box + zoom range and
-/// writes them into an MBTiles file. Runs as a Swift concurrency `Task`, so
-/// callers can cancel or observe progress.
+/// Downloads topographic raster tiles for a bounding box + zoom range from a
+/// `MapSource` and writes them into an MBTiles file. Runs as a Swift
+/// concurrency `Task`, so callers can cancel or observe progress.
 ///
-/// USGS tile endpoint (ArcGIS REST, XYZ convention):
-///   https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}
-///
-/// MBTiles stores tiles in TMS convention (Y origin at the bottom), so we
-/// flip Y when writing:  tmsY = (1 << z) - 1 - xyzY
+/// Every supported source uses the XYZ / "slippy map" convention (top-left
+/// origin), e.g. `…/{z}/{y}/{x}.png`. MBTiles stores tiles in TMS convention
+/// (Y origin at the bottom), so we flip Y when writing:
+///   tmsY = (1 << z) - 1 - xyzY
 actor TileDownloader {
 
     private let log = Logger(subsystem: "com.levijohnson.DogTracker", category: "TileDownloader")
     private let session: URLSession
-    private let baseURL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile"
 
     /// Download progress: number of tiles completed / total.
     var completed: Int = 0
@@ -31,6 +29,7 @@ actor TileDownloader {
     /// Download tiles and write them to an MBTiles file at `outputURL`.
     /// Returns the file size in bytes.
     func download(
+        source: MapSource,
         minLat: Double, maxLat: Double,
         minLon: Double, maxLon: Double,
         minZoom: Int, maxZoom: Int,
@@ -57,10 +56,11 @@ actor TileDownloader {
 
         let writer = try MBTilesWriter(fileURL: outputURL)
         try writer.writeMetadata([
-            ("name", "USGS Topo"),
+            ("name", source.displayName),
             ("format", "png"),
             ("type", "overlay"),
-            ("description", "USGS US Topo tiles"),
+            ("description", "\(source.displayName) tiles"),
+            ("attribution", source.attribution),
             ("bounds", "\(minLon),\(minLat),\(maxLon),\(maxLat)"),
             ("minzoom", "\(minZoom)"),
             ("maxzoom", "\(maxZoom)"),
@@ -79,7 +79,7 @@ actor TileDownloader {
             try await withThrowingTaskGroup(of: (Int, Int, Int, Data).self) { group in
                 for (z, x, y) in slice {
                     group.addTask { [self] in
-                        let data = try await self.fetchTile(z: z, x: x, y: y)
+                        let data = try await self.fetchTile(z: z, x: x, y: y, template: source.tileURLTemplate)
                         return (z, x, y, data)
                     }
                 }
@@ -105,13 +105,24 @@ actor TileDownloader {
 
     // MARK: - Private
 
-    private func fetchTile(z: Int, x: Int, y: Int) async throws -> Data {
-        let url = URL(string: "\(baseURL)/\(z)/\(y)/\(x)")!
+    private func fetchTile(z: Int, x: Int, y: Int, template: String) async throws -> Data {
+        guard let url = Self.tileURL(template: template, z: z, x: x, y: y) else {
+            throw TileDownloadError.httpError(z: z, x: x, y: y)
+        }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw TileDownloadError.httpError(z: z, x: x, y: y)
         }
         return data
+    }
+
+    /// Substitute `{z}`/`{x}`/`{y}` placeholders in an XYZ tile template.
+    static func tileURL(template: String, z: Int, x: Int, y: Int) -> URL? {
+        let s = template
+            .replacingOccurrences(of: "{z}", with: String(z))
+            .replacingOccurrences(of: "{x}", with: String(x))
+            .replacingOccurrences(of: "{y}", with: String(y))
+        return URL(string: s)
     }
 
     /// Convert lat/lon to tile X,Y at the given zoom (XYZ / "slippy map" convention).

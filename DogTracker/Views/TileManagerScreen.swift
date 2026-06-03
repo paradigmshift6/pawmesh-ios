@@ -32,7 +32,7 @@ struct TileManagerScreen: View {
             ContentUnavailableView(
                 "No offline regions",
                 systemImage: "square.grid.3x3.square",
-                description: Text("Tap + to download USGS topo tiles for offline use.\nDo this on Wi-Fi before heading into the backcountry.")
+                description: Text("Tap + to download topo tiles for offline use.\nDo this on Wi-Fi before heading into the backcountry.")
             )
         } else {
             List {
@@ -89,6 +89,8 @@ private struct TileRegionRow: View {
 struct TileDownloadSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(LocationProvider.self) private var location
+    @AppStorage("mapSourceMode") private var mapSourceMode = MapSource.autoModeID
 
     @State private var regionName = ""
     @State private var minZoom = 10
@@ -99,6 +101,9 @@ struct TileDownloadSheet: View {
     @State private var errorMessage: String?
     /// Bounding box derived from the visible map region.
     @State private var visibleBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
+    /// Tile source for the area being viewed (resolved from the map center +
+    /// the Settings override). Drives both the preview and the download.
+    @State private var pickerSource: MapSource = .bkgTopPlus
     @FocusState private var nameFieldFocused: Bool
 
     var body: some View {
@@ -130,8 +135,9 @@ struct TileDownloadSheet: View {
 
     private var mapSection: some View {
         ZStack {
-            RegionPickerMap(onBoundsChanged: { bounds in
+            RegionPickerMap(source: pickerSource, onBoundsChanged: { bounds in
                 visibleBounds = bounds
+                updatePickerSource(forCenterOf: bounds)
             })
             .ignoresSafeArea(edges: .horizontal)
 
@@ -156,6 +162,28 @@ struct TileDownloadSheet: View {
             .padding(.top, 8)
         }
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .bottomLeading) {
+            MapAttributionLabel(source: pickerSource)
+                .padding(.leading, 8)
+                .padding(.bottom, 8)
+        }
+        .onAppear {
+            pickerSource = MapSource.resolve(mode: mapSourceMode, coordinate: location.userLocation?.coordinate)
+        }
+    }
+
+    /// Re-resolve the tile source as the user pans, clamping the zoom range to
+    /// what the new source supports.
+    private func updatePickerSource(forCenterOf bounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) {
+        let center = CLLocationCoordinate2D(
+            latitude: (bounds.minLat + bounds.maxLat) / 2,
+            longitude: (bounds.minLon + bounds.maxLon) / 2
+        )
+        let resolved = MapSource.resolve(mode: mapSourceMode, coordinate: center)
+        guard resolved.id != pickerSource.id else { return }
+        pickerSource = resolved
+        maxZoom = min(maxZoom, resolved.maxZoom)
+        minZoom = min(minZoom, maxZoom)
     }
 
     // MARK: - Controls
@@ -177,7 +205,7 @@ struct TileDownloadSheet: View {
             }
             HStack {
                 Spacer()
-                Stepper("Max \(maxZoom)", value: $maxZoom, in: minZoom...16)
+                Stepper("Max \(maxZoom)", value: $maxZoom, in: minZoom...pickerSource.maxZoom)
                     .fixedSize()
             }
 
@@ -244,6 +272,7 @@ struct TileDownloadSheet: View {
 
     private func startDownload() {
         guard let b = visibleBounds else { return }
+        let source = pickerSource
         isDownloading = true
         errorMessage = nil
 
@@ -260,6 +289,7 @@ struct TileDownloadSheet: View {
 
                 let downloader = TileDownloader()
                 let size = try await downloader.download(
+                    source: source,
                     minLat: b.minLat, maxLat: b.maxLat,
                     minLon: b.minLon, maxLon: b.maxLon,
                     minZoom: minZoom, maxZoom: maxZoom,
@@ -277,7 +307,8 @@ struct TileDownloadSheet: View {
                     minLatitude: b.minLat, maxLatitude: b.maxLat,
                     minLongitude: b.minLon, maxLongitude: b.maxLon,
                     minZoom: minZoom, maxZoom: maxZoom,
-                    sizeBytes: size
+                    sizeBytes: size,
+                    sourceID: source.id
                 )
                 modelContext.insert(region)
                 try modelContext.save()
@@ -293,8 +324,10 @@ struct TileDownloadSheet: View {
 // MARK: - Region picker map (UIViewRepresentable)
 
 /// A plain MapLibre map used to select a download region.
-/// Reports the visible bounding box whenever the user finishes panning/zooming.
+/// Renders the supplied `source` and reports the visible bounding box whenever
+/// the user pans/zooms.
 private struct RegionPickerMap: UIViewRepresentable {
+    let source: MapSource
     let onBoundsChanged: ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void
 
     func makeUIView(context: Context) -> MLNMapView {
@@ -308,7 +341,9 @@ private struct RegionPickerMap: UIViewRepresentable {
         return map
     }
 
-    func updateUIView(_ uiView: MLNMapView, context: Context) {}
+    func updateUIView(_ uiView: MLNMapView, context: Context) {
+        context.coordinator.apply(source: source, to: uiView)
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onBoundsChanged: onBoundsChanged)
@@ -316,11 +351,38 @@ private struct RegionPickerMap: UIViewRepresentable {
 
     @MainActor class Coordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         let onBoundsChanged: ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void
-        private var tileSourceAdded = false
+        private var appliedSourceID: String?
+        private var desiredSource: MapSource = .bkgTopPlus
         private var hasInitialCenter = false
 
         init(onBoundsChanged: @escaping ((minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Void) {
             self.onBoundsChanged = onBoundsChanged
+        }
+
+        /// Render `source`, swapping the raster layer when it changes. Safe to
+        /// call before the style loads — `didFinishLoading` re-applies.
+        func apply(source: MapSource, to mapView: MLNMapView) {
+            desiredSource = source
+            guard let style = mapView.style else { return }
+            applyResolved(to: style)
+        }
+
+        private func applyResolved(to style: MLNStyle) {
+            guard desiredSource.id != appliedSourceID else { return }
+            appliedSourceID = desiredSource.id
+            if let layer = style.layer(withIdentifier: "picker-topo-layer") { style.removeLayer(layer) }
+            if let s = style.source(withIdentifier: "picker-topo") { style.removeSource(s) }
+            let tiles = MLNRasterTileSource(
+                identifier: "picker-topo",
+                tileURLTemplates: [desiredSource.tileURLTemplate],
+                options: [
+                    .tileSize: 256,
+                    .minimumZoomLevel: desiredSource.minZoom,
+                    .maximumZoomLevel: desiredSource.maxZoom,
+                ]
+            )
+            style.addSource(tiles)
+            style.addLayer(MLNRasterStyleLayer(identifier: "picker-topo-layer", source: tiles))
         }
 
         func mapView(_ mapView: MLNMapView, didUpdate userLocation: MLNUserLocation?) {
@@ -335,21 +397,7 @@ private struct RegionPickerMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
-            guard !tileSourceAdded else { return }
-            tileSourceAdded = true
-            let source = MLNRasterTileSource(
-                identifier: "usgs-topo",
-                tileURLTemplates: [
-                    "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"
-                ],
-                options: [
-                    .tileSize: 256,
-                    .minimumZoomLevel: 1,
-                    .maximumZoomLevel: 16,
-                ]
-            )
-            style.addSource(source)
-            style.addLayer(MLNRasterStyleLayer(identifier: "usgs-topo-layer", source: source))
+            applyResolved(to: style)
         }
 
         func mapViewRegionIsChanging(_ mapView: MLNMapView) {

@@ -22,7 +22,7 @@ struct WelcomeStepView: View {
 
             VStack(alignment: .leading, spacing: 16) {
                 FeatureRow(icon: "antenna.radiowaves.left.and.right", title: "No cell service needed", subtitle: "Uses LoRa mesh radio for miles of range")
-                FeatureRow(icon: "map.fill", title: "Offline topo maps", subtitle: "Download USGS maps before you go")
+                FeatureRow(icon: "map.fill", title: "Offline topo maps", subtitle: "Download topo maps before you go")
                 FeatureRow(icon: "location.fill", title: "Real-time GPS", subtitle: "See your dogs on the map with live updates")
             }
             .padding(.horizontal, 24)

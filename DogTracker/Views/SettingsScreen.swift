@@ -8,6 +8,7 @@ struct SettingsScreen: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var fixes: [Fix]
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
+    @AppStorage("mapSourceMode") private var mapSourceMode = MapSource.autoModeID
     @State private var showTrackerSetup = false
     @State private var resetTarget: ResetTarget?
     @State private var showResetConfirm = false
@@ -19,6 +20,7 @@ struct SettingsScreen: View {
             Form {
                 radioSection
                 unitsSection
+                mapsSection
                 fencesSection
                 deviceSetupSection
                 factoryResetSection
@@ -89,6 +91,22 @@ struct SettingsScreen: View {
         }
     }
 
+    private var mapsSection: some View {
+        Section {
+            Picker("Map source", selection: $mapSourceMode) {
+                Text("Automatic").tag(MapSource.autoModeID)
+                ForEach(MapSource.all) { source in
+                    Text(source.displayName).tag(source.id)
+                }
+            }
+        } header: {
+            Text("Maps")
+        } footer: {
+            Text("Automatic picks the best topographic map for your location: basemap.at in Austria, USGS in the United States, and TopPlusOpen elsewhere (including Germany).\n\nMap data: © basemap.at (CC-BY 4.0) · © BKG (dl-de/by-2-0) · USGS The National Map (public domain).")
+                .font(.caption2)
+        }
+    }
+
     private var meshSection: some View {
         Section("Mesh") {
             LabeledContent("Nodes seen", value: "\(mesh.nodes.count)")
@@ -153,8 +171,7 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: "1.2.0")
-            LabeledContent("Map data", value: "USGS US Topo (public domain)")
+            LabeledContent("Version", value: "1.3.0")
             LabeledContent("Protocol", value: "Meshtastic® v2.7.21")
             LabeledContent("License", value: "GPL-3.0")
         } header: {

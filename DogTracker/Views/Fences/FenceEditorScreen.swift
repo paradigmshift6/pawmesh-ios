@@ -16,6 +16,7 @@ struct FenceEditorScreen: View {
     @Environment(LocationProvider.self) private var location
     @Environment(UnitSettings.self) private var units
     @Query(sort: \Tracker.assignedAt) private var trackers: [Tracker]
+    @AppStorage("mapSourceMode") private var mapSourceMode = MapSource.autoModeID
 
     @State private var name: String = ""
     @State private var centerLatitude: Double = 0
@@ -79,6 +80,7 @@ struct FenceEditorScreen: View {
                 markers: [],
                 fences: previewFences,
                 centerOn: hasInitialCenter ? CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude) : nil,
+                onlineSource: MapSource.resolve(mode: mapSourceMode, coordinate: location.userLocation?.coordinate),
                 onMapTap: { coord in
                     centerLatitude = coord.latitude
                     centerLongitude = coord.longitude
@@ -86,6 +88,13 @@ struct FenceEditorScreen: View {
                 }
             )
             .frame(maxHeight: .infinity)
+            .overlay(alignment: .bottomLeading) {
+                MapAttributionLabel(
+                    source: MapSource.resolve(mode: mapSourceMode, coordinate: location.userLocation?.coordinate)
+                )
+                .padding(.leading, 8)
+                .padding(.bottom, 8)
+            }
 
             if !hasInitialCenter {
                 Text("Tap the map to place the fence center")

@@ -22,6 +22,11 @@ final class TileRegion {
     var sizeBytes: Int64
     var downloadedAt: Date
 
+    /// `MapSource.id` the tiles were downloaded from. Optional so SwiftData can
+    /// lightweight-migrate existing regions; `nil` means a pre-1.3 region, which
+    /// was always USGS US Topo (see `MapSource.with(id:)`).
+    var sourceID: String?
+
     init(
         name: String,
         filename: String,
@@ -32,6 +37,7 @@ final class TileRegion {
         minZoom: Int,
         maxZoom: Int,
         sizeBytes: Int64,
+        sourceID: String? = nil,
         downloadedAt: Date = .now
     ) {
         self.name = name
@@ -43,6 +49,10 @@ final class TileRegion {
         self.minZoom = minZoom
         self.maxZoom = maxZoom
         self.sizeBytes = sizeBytes
+        self.sourceID = sourceID
         self.downloadedAt = downloadedAt
     }
+
+    /// The `MapSource` these tiles came from.
+    var source: MapSource { MapSource.with(id: sourceID) }
 }
