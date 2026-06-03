@@ -50,7 +50,9 @@ struct MapScreen: View {
         .overlay(alignment: .bottomTrailing) { pingAllButton }
         .overlay(alignment: .bottom) { lowBatteryBanner }
         .overlay(alignment: .bottomLeading) {
-            MapAttributionLabel(source: attributionSource)
+            // The live map renders the underlay (BKG under basemap.at), so credit
+            // it too — except when showing single-source offline tiles.
+            MapAttributionLabel(source: attributionSource, includeUnderlay: activeOfflineRegion == nil)
                 .padding(.leading, 8)
                 .padding(.bottom, 8)
         }

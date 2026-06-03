@@ -28,7 +28,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>PawMesh reads your watch's compass so the arrow points toward each dog as you turn your wrist.</string>
 	<key>WKApplication</key>

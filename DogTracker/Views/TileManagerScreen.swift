@@ -163,7 +163,7 @@ struct TileDownloadSheet: View {
         }
         .frame(maxHeight: .infinity)
         .overlay(alignment: .bottomLeading) {
-            MapAttributionLabel(source: pickerSource)
+            MapAttributionLabel(source: pickerSource, includeUnderlay: false)
                 .padding(.leading, 8)
                 .padding(.bottom, 8)
         }

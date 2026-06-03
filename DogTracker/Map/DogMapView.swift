@@ -35,8 +35,21 @@ struct DogMapView: UIViewRepresentable {
     /// coordinate (used by the fence editor to place the center).
     var onMapTap: ((CLLocationCoordinate2D) -> Void)?
 
+    /// An empty MapLibre style (neutral background only). Without this, an
+    /// MLNMapView with no styleURL loads MapLibre's default *demo* world style,
+    /// whose opaque `countries-fill` layer sits on top of our raster basemap and
+    /// hides it (the map shows a flat green world). With an empty style our tile
+    /// layers are the only basemap, so z-ordering is clean and predictable.
+    private static let emptyStyleURL: URL = {
+        let json = ##"{"version":8,"name":"pawmesh-empty","sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#e8eae6"}}]}"##
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pawmesh-empty-style.json")
+        try? json.data(using: .utf8)?.write(to: url)
+        return url
+    }()
+
     func makeUIView(context: Context) -> MLNMapView {
         let mapView = MLNMapView(frame: .zero)
+        mapView.styleURL = Self.emptyStyleURL
         mapView.delegate = context.coordinator
 
         // Show user location (blue dot). We disable follow mode so the user
@@ -97,11 +110,15 @@ struct DogMapView: UIViewRepresentable {
         private var fenceSources: [UUID: MLNShapeSource] = [:]
         private var fenceFillLayers: [UUID: MLNFillStyleLayer] = [:]
         private var fenceLineLayers: [UUID: MLNLineStyleLayer] = [:]
-        static let tileSourceID = "topo-source"
-        static let tileLayerID = "topo-layer"
         /// Identifies the currently-rendered tiles: an offline file path or
-        /// "online:<source id>". We only rebuild the raster layer when it changes.
+        /// "online:<source id>". We only rebuild the raster stack when it changes.
         private var appliedTileKey: String?
+        /// Style ids of the raster source(s)/layer(s) we added, so we remove
+        /// exactly those on the next swap. Made unique per swap (via the counter)
+        /// so MapLibre never serves stale tiles cached under a recycled id.
+        private var currentSourceIDs: [String] = []
+        private var currentLayerIDs: [String] = []
+        private var tileSwapCounter = 0
         /// Latest source/path requested by the parent, re-applied once the
         /// style finishes loading (updateUIView can run before that).
         private var desiredOnlineSource: MapSource = .bkgTopPlus
@@ -131,16 +148,18 @@ struct DogMapView: UIViewRepresentable {
             desiredOfflinePath = nil
             appliedTileKey = nil
             guard let style = mapViewRef?.style else { return }
-            removeTileLayer(from: style)
+            removeTileLayers(from: style)
         }
 
-        private func removeTileLayer(from style: MLNStyle) {
-            if let layer = style.layer(withIdentifier: Self.tileLayerID) {
-                style.removeLayer(layer)
+        private func removeTileLayers(from style: MLNStyle) {
+            for id in currentLayerIDs where style.layer(withIdentifier: id) != nil {
+                style.removeLayer(style.layer(withIdentifier: id)!)
             }
-            if let source = style.source(withIdentifier: Self.tileSourceID) {
-                style.removeSource(source)
+            for id in currentSourceIDs {
+                if let source = style.source(withIdentifier: id) { style.removeSource(source) }
             }
+            currentLayerIDs.removeAll()
+            currentSourceIDs.removeAll()
         }
 
         /// Fit the viewport to include the user location + every marker.
@@ -446,37 +465,49 @@ struct DogMapView: UIViewRepresentable {
             guard key != appliedTileKey else { return }
             appliedTileKey = key
 
-            removeTileLayer(from: style)
+            removeTileLayers(from: style)
+            tileSwapCounter += 1
+            let gen = tileSwapCounter
 
-            let source: MLNRasterTileSource
+            // Build the raster stack, bottom-first. For an online source that
+            // only partially covers the map (basemap.at = Austria only), draw its
+            // worldwide underlay (BKG) beneath it so there are never blank tiles.
+            var specs: [(templates: [String], minZoom: Int?, maxZoom: Int?)] = []
             if let path = desiredOfflinePath {
-                source = MLNRasterTileSource(
-                    identifier: Self.tileSourceID,
-                    tileURLTemplates: ["mbtiles://\(path)"],
-                    options: [.tileSize: 256]
-                )
+                specs.append((["mbtiles://\(path)"], nil, nil))
             } else {
-                source = MLNRasterTileSource(
-                    identifier: Self.tileSourceID,
-                    tileURLTemplates: [desiredOnlineSource.tileURLTemplate],
-                    options: [
-                        .tileSize: 256,
-                        .minimumZoomLevel: desiredOnlineSource.minZoom,
-                        .maximumZoomLevel: desiredOnlineSource.maxZoom,
-                    ]
-                )
+                if let under = desiredOnlineSource.underlay {
+                    specs.append(([under.tileURLTemplate], under.minZoom, under.maxZoom))
+                }
+                specs.append(([desiredOnlineSource.tileURLTemplate],
+                              desiredOnlineSource.minZoom, desiredOnlineSource.maxZoom))
             }
-            style.addSource(source)
 
-            // Place the basemap above any background layer but beneath the
-            // first content layer (trails / fences) so those stay visible
-            // across source swaps. With no content layers yet (first load),
-            // add on top — matching the original behavior that's known to render.
-            let layer = MLNRasterStyleLayer(identifier: Self.tileLayerID, source: source)
-            if let firstContent = style.layers.first(where: { !($0 is MLNBackgroundStyleLayer) }) {
-                style.insertLayer(layer, below: firstContent)
-            } else {
-                style.addLayer(layer)
+            // Keep the whole basemap stack beneath trails / fences (markers are
+            // annotation views and always render on top). On first load there are
+            // no content layers, so the stack is added on top of the background.
+            let anchor = style.layers.first { !($0 is MLNBackgroundStyleLayer) }
+            var previous: MLNStyleLayer?
+            for (i, spec) in specs.enumerated() {
+                let sid = "topo-src-\(gen)-\(i)"
+                let lid = "topo-lyr-\(gen)-\(i)"
+                var options: [MLNTileSourceOption: Any] = [.tileSize: 256]
+                if let mn = spec.minZoom { options[.minimumZoomLevel] = mn }
+                if let mx = spec.maxZoom { options[.maximumZoomLevel] = mx }
+                let src = MLNRasterTileSource(identifier: sid, tileURLTemplates: spec.templates, options: options)
+                style.addSource(src)
+                currentSourceIDs.append(sid)
+
+                let layer = MLNRasterStyleLayer(identifier: lid, source: src)
+                if let previous {
+                    style.insertLayer(layer, above: previous)   // stack upward
+                } else if let anchor {
+                    style.insertLayer(layer, below: anchor)      // bottom of content
+                } else {
+                    style.addLayer(layer)
+                }
+                currentLayerIDs.append(lid)
+                previous = layer
             }
         }
 
@@ -539,13 +570,19 @@ struct DogTrail: Equatable {
 /// licenses; we credit USGS too.
 struct MapAttributionLabel: View {
     let source: MapSource
+    /// Whether to also credit the underlay provider (true for the live map,
+    /// which renders the underlay; false for single-source views like the
+    /// download picker and offline tiles).
+    var includeUnderlay = true
     @Environment(\.openURL) private var openURL
+
+    private var text: String { includeUnderlay ? source.attributionLine : source.attribution }
 
     var body: some View {
         Button {
             if let url = source.attributionURL { openURL(url) }
         } label: {
-            Text(source.attribution)
+            Text(text)
                 .font(.caption2)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
@@ -553,7 +590,7 @@ struct MapAttributionLabel: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .accessibilityLabel("Map data: \(source.attribution)")
+        .accessibilityLabel("Map data: \(text)")
     }
 }
 

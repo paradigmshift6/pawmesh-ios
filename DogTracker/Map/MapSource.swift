@@ -51,6 +51,17 @@ struct MapSource: Identifiable, Equatable, Sendable {
     func covers(_ coord: CLLocationCoordinate2D) -> Bool {
         coverage.contains { $0.contains(coord) }
     }
+
+    /// A worldwide base layer drawn *beneath* this source to fill gaps in its
+    /// coverage. basemap.at only has tiles inside Austria (blank/404 elsewhere),
+    /// so it is backed by BKG TopPlusOpen — guaranteeing no blank tiles at the
+    /// German border even if a town slips inside the Austria bounding boxes.
+    var underlay: MapSource? { id == MapSource.basemapAT.id ? .bkgTopPlus : nil }
+
+    /// Attribution including the underlay provider, when one is rendered.
+    var attributionLine: String {
+        underlay.map { "\(attribution) · \($0.attribution)" } ?? attribution
+    }
 }
 
 extension MapSource {

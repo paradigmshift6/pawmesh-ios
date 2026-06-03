@@ -40,7 +40,7 @@ targets:
       properties:
         CFBundleDisplayName: PawMesh
         CFBundleShortVersionString: "1.3.0"
-        CFBundleVersion: "6"
+        CFBundleVersion: "7"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
         UISupportedInterfaceOrientations:
@@ -83,7 +83,7 @@ targets:
       properties:
         CFBundleDisplayName: PawMesh
         CFBundleShortVersionString: "1.3.0"
-        CFBundleVersion: "6"
+        CFBundleVersion: "7"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.levijohnson.DogTracker
         WKWatchOnly: false
@@ -116,7 +116,7 @@ targets:
       properties:
         CFBundleDisplayName: PawMesh Complication
         CFBundleShortVersionString: "1.3.0"
-        CFBundleVersion: "6"
+        CFBundleVersion: "7"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
