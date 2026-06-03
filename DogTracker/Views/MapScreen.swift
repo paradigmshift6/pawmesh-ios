@@ -13,6 +13,10 @@ struct MapScreen: View {
     @Query(sort: \TileRegion.downloadedAt, order: .reverse) private var regions: [TileRegion]
     /// Persisted Settings override: "auto" or a specific MapSource.id.
     @AppStorage("mapSourceMode") private var mapSourceMode = MapSource.autoModeID
+    /// Last source that auto-resolved from a real location. Used as the default
+    /// before a GPS fix / first marker arrives so we don't downgrade (e.g. a US
+    /// user briefly seeing worldwide tiles instead of USGS). Defaults to USGS.
+    @AppStorage("lastAutoMapSource") private var lastAutoSource = MapSource.usgs.id
     @State private var centerOn: CLLocationCoordinate2D?
     @State private var selectedTracker: Tracker?
     /// Bump this to ask DogMapView to fit the viewport to user+markers.
@@ -67,6 +71,11 @@ struct MapScreen: View {
         }
         .onChange(of: NotificationAuthorization.shared.pendingDeepLink) { _, _ in
             consumeDeepLink()
+        }
+        .onChange(of: autoResolvedSourceID) { _, newID in
+            // Remember the source we resolved from a real location so the next
+            // cold launch defaults to it instead of the worldwide fallback.
+            if let newID { lastAutoSource = newID }
         }
     }
 
@@ -142,7 +151,17 @@ struct MapScreen: View {
 
     /// Online source to use when no offline tiles cover the view.
     private var resolvedOnlineSource: MapSource {
-        MapSource.resolve(mode: mapSourceMode, coordinate: representativeCoordinate)
+        MapSource.resolve(mode: mapSourceMode, coordinate: representativeCoordinate,
+                          fallbackID: lastAutoSource)
+    }
+
+    /// The source auto-resolved from a real location/marker right now, or nil if
+    /// location is unknown or a manual override is active. Observed so we can
+    /// remember it as the cold-launch default (see `lastAutoSource`).
+    private var autoResolvedSourceID: String? {
+        guard mapSourceMode == MapSource.autoModeID,
+              let c = representativeCoordinate else { return nil }
+        return MapSource.automatic(for: c).id
     }
 
     /// Downloaded region to render, if any: the one covering our location, or —

@@ -127,8 +127,16 @@ extension MapSource {
 
     /// Resolve the effective online source from the persisted Settings mode
     /// (`autoModeID` or a specific source id) plus the best-known coordinate.
-    static func resolve(mode: String, coordinate: CLLocationCoordinate2D?) -> MapSource {
-        if mode == autoModeID { return automatic(for: coordinate) }
-        return all.first { $0.id == mode } ?? automatic(for: coordinate)
+    ///
+    /// When the mode is automatic but no coordinate is known yet (no GPS fix and
+    /// no markers), fall back to `fallbackID` rather than the worldwide source —
+    /// otherwise a US user would briefly see low-detail worldwide tiles instead
+    /// of USGS on cold launch / with location denied. Callers pass the last
+    /// source that auto-resolved by location so the default tracks where you are.
+    static func resolve(mode: String, coordinate: CLLocationCoordinate2D?,
+                        fallbackID: String = MapSource.usgs.id) -> MapSource {
+        if mode != autoModeID { return all.first { $0.id == mode } ?? .bkgTopPlus }
+        if coordinate != nil { return automatic(for: coordinate) }
+        return all.first { $0.id == fallbackID } ?? .usgs
     }
 }
